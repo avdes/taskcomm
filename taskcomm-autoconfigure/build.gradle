@@ -1,0 +1,72 @@
+// Единственный модуль с кодом (docs/adr/0001). Зависимости на Spring Boot — compileOnly:
+// реальные транзитивы для потребителя собираются в taskcomm-spring-boot-starter через api.
+plugins {
+    id 'checkstyle'
+    alias(libs.plugins.spotless)
+    alias(libs.plugins.errorprone)
+}
+
+dependencies {
+    compileOnly platform(libs.spring.boot.bom)
+    testImplementation platform(libs.spring.boot.bom)
+
+    compileOnly libs.spring.boot.autoconfigure
+    annotationProcessor libs.spring.boot.configuration.processor
+    annotationProcessor libs.spring.boot.autoconfigure.processor
+
+    compileOnly libs.jetbrains.annotations
+
+    compileOnly libs.lombok
+    annotationProcessor libs.lombok
+    annotationProcessor libs.lombok.mapstruct.binding
+
+    compileOnly libs.mapstruct
+    annotationProcessor libs.mapstruct.processor
+
+    errorprone libs.errorprone.core
+
+    testCompileOnly libs.lombok
+    testAnnotationProcessor libs.lombok
+
+    testImplementation libs.spring.boot.starter.test
+    testImplementation libs.archunit.junit5
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+checkstyle {
+    toolVersion = libs.versions.checkstyle.get()
+    configFile = rootProject.file('checkstyle.xml')
+    // checkstyle.xml ссылается на checkstyle-suppressions.xml через ${taskcomm_config_dir}, а не
+    // ${config_loc}: этим именем с Gradle 9 владеет сам плагин checkstyle (через configDirectory,
+    // который для нас означал бы рекурсивное хеширование всего корня репозитория как input —
+    // включая .gradle/, что и падает). Своё имя свойства обходит оба ограничения.
+    configProperties = ['taskcomm_config_dir': rootProject.projectDir.absolutePath]
+}
+
+spotless {
+    // Единый источник правды о переносе строк — .gitattributes (LF везде), а не платформа сборки.
+    lineEndings = com.diffplug.spotless.LineEnding.GIT_ATTRIBUTES_FAST_ALLSAME
+
+    java {
+        // Известная граблина (см. CLAUDE.md, «Каталог версий»): форматирование Java 21
+        // (sealed, pattern matching в switch, unnamed-паттерны) надёжно работает, только если
+        // Gradle daemon сам запущен на JDK 21 — держим JAVA_HOME на JDK 21 при сборке.
+        palantirJavaFormat(libs.versions.palantir.java.format.get())
+        removeUnusedImports()
+        importOrder()
+        trimTrailingWhitespace()
+        endWithNewline()
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    // net.ltgt.errorprone требует именно эту связку флагов компилятора (см. CLAUDE.md,
+    // «Известные грабли сборки»); add-exports/add-opens для доступа к внутренностям javac
+    // плагин добавляет сам.
+    options.compilerArgs << '-XDcompilePolicy=simple' << '--should-stop=ifError=FLOW'
+    options.errorprone {
+        // Lombok генерирует код в том же раунде компиляции, что видит Error Prone — точечно
+        // не считаем это чужим кодом источником ошибок, а не глушим правило целиком.
+        disableWarningsInGeneratedCode = true
+    }
+}

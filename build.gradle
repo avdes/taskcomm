@@ -1,0 +1,43 @@
+// Корневой проект не содержит кода — только общие настройки для двух модулей
+// (docs/adr/0001-module-layout.md). Каждый модуль остаётся java-library: у стартера просто
+// не будет исходников.
+allprojects {
+    group = 'xyz.avasilev'
+    version = '2.0.0'
+}
+
+subprojects {
+    apply plugin: 'java-library'
+    apply plugin: 'maven-publish'
+
+    java {
+        // Java 21 — фиксированное решение проекта (CLAUDE.md), а не значение из каталога версий:
+        // обращение к version catalog из subprojects{} в корневом build.gradle помечено
+        // deprecated в Gradle 9 (implicit lookup in parent projects, уйдёт в Gradle 10).
+        toolchain {
+            languageVersion = JavaLanguageVersion.of(21)
+        }
+    }
+
+    tasks.withType(JavaCompile).configureEach {
+        options.encoding = 'UTF-8'
+    }
+
+    tasks.withType(Test).configureEach {
+        useJUnitPlatform()
+    }
+
+    tasks.withType(Javadoc).configureEach {
+        options.encoding = 'UTF-8'
+    }
+
+    // Публикация в Nexus пока не настроена (CLAUDE.md) — только publishToMavenLocal для отладки
+    // в приложении-потребителе. Оба модуля публикуются под одной и той же version/group.
+    publishing {
+        publications {
+            maven(MavenPublication) {
+                from components.java
+            }
+        }
+    }
+}

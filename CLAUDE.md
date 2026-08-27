@@ -50,11 +50,21 @@ Spring Boot стартер, инкапсулирующий таск-менедж
 
 Фиксируем явно, в version catalog внутри `settings.gradle`:
 
-- Spring Boot `3.5.16`, MapStruct `1.6.3` вместе с `lombok-mapstruct-binding`,
+- Spring Boot `3.5.16`, MapStruct `1.6.3` вместе с `lombok-mapstruct-binding 0.2.0`,
   Lombok `1.18.32`, `org.jetbrains:annotations 24.1.0`
-- Checkstyle, Spotless с palantir-java-format, Error Prone, ArchUnit — **версии уточнить**
-  перед написанием `build.gradle`
-- Версия Gradle живёт в `gradle-wrapper.properties`, а не в каталоге, но фиксируется так же
+- Checkstyle `14.0.0`, Spotless (плагин `com.diffplug.spotless`) `8.10.0` с шагом
+  `palantirJavaFormat('2.97.0')`, Error Prone — плагин `net.ltgt.errorprone 5.1.0` и
+  `com.google.errorprone:error_prone_core 2.50.0`, ArchUnit `1.5.0` (`archunit-junit5`)
+- Версия Gradle живёт в `gradle-wrapper.properties`, а не в каталоге, но фиксируется так же:
+  Gradle `9.7.1`
+
+**Грабля Spotless + palantir-java-format на Java 21.** Форматирование конструкций Java 21
+(записи с распаковкой, `sealed`, pattern matching в `switch`, unnamed-паттерны `_`) у
+`palantir-java-format` работает надёжно, только если **сам Gradle daemon запущен на JDK 21**
+(а не только toolchain нацелен на 21) — либо если включено свойство
+`palantir.native.formatter=true` в `gradle.properties`. Несовпадение версии daemon даёт
+`FormatterException` на ровном месте. У нас toolchain и так Java 21 — держим `JAVA_HOME`
+при сборке на JDK 21, чтобы это не всплыло.
 
 **Не пиним** — версии приходят из BOM Spring Boot: Micrometer и его реестры, драйвер PostgreSQL,
 Tomcat. Явный пин старой ветки Micrometer против Boot 3.5 ломает Actuator, а пин драйвера
@@ -631,6 +641,8 @@ Task ──process────────────────────�
   возможны ложные срабатывания — глушить точечно, не целым правилом.
 - **Spotless и Checkstyle** должны быть настроены на один и тот же стиль, иначе они начнут
   переписывать код друг за другом.
+- **Spotless + palantir-java-format на JDK младше 21**: см. раздел «Каталог версий» —
+  Gradle daemon должен работать на JDK 21, иначе форматирование Java 21-конструкций падает.
 
 ## Открытые вопросы
 

@@ -1,0 +1,50 @@
+rootProject.name = 'taskcomm'
+
+dependencyResolutionManagement {
+    repositories {
+        mavenCentral()
+    }
+
+    // Version catalog. Версии фиксируются здесь явно — см. CLAUDE.md, раздел «Каталог версий».
+    // Версия самого Gradle сюда не входит: она живёт в gradle/wrapper/gradle-wrapper.properties.
+    versionCatalogs {
+        libs {
+            // Приходят из BOM Spring Boot ниже, но версия самого Boot фиксируется явно.
+            version('spring-boot', '3.5.16')
+            version('mapstruct', '1.6.3')
+            version('lombok', '1.18.32')
+            version('lombok-mapstruct-binding', '0.2.0')
+            version('jetbrains-annotations', '24.1.0')
+
+            // Инструменты сборки и контроля качества кода.
+            version('checkstyle', '14.0.0')
+            version('spotless-plugin', '8.10.0')
+            version('palantir-java-format', '2.97.0')
+            version('errorprone-plugin', '5.1.0')
+            version('errorprone-core', '2.50.0')
+            version('archunit', '1.5.0')
+
+            library('spring-boot-bom', 'org.springframework.boot', 'spring-boot-dependencies').versionRef('spring-boot')
+            library('spring-boot-autoconfigure', 'org.springframework.boot', 'spring-boot-autoconfigure').versionRef('spring-boot')
+            library('spring-boot-starter', 'org.springframework.boot', 'spring-boot-starter').versionRef('spring-boot')
+            library('spring-boot-starter-test', 'org.springframework.boot', 'spring-boot-starter-test').versionRef('spring-boot')
+            library('spring-boot-configuration-processor', 'org.springframework.boot', 'spring-boot-configuration-processor').versionRef('spring-boot')
+            library('spring-boot-autoconfigure-processor', 'org.springframework.boot', 'spring-boot-autoconfigure-processor').versionRef('spring-boot')
+
+            library('lombok', 'org.projectlombok', 'lombok').versionRef('lombok')
+            library('lombok-mapstruct-binding', 'org.projectlombok', 'lombok-mapstruct-binding').versionRef('lombok-mapstruct-binding')
+            library('mapstruct', 'org.mapstruct', 'mapstruct').versionRef('mapstruct')
+            library('mapstruct-processor', 'org.mapstruct', 'mapstruct-processor').versionRef('mapstruct')
+            library('jetbrains-annotations', 'org.jetbrains', 'annotations').versionRef('jetbrains-annotations')
+
+            library('archunit-junit5', 'com.tngtech.archunit', 'archunit-junit5').versionRef('archunit')
+            library('errorprone-core', 'com.google.errorprone', 'error_prone_core').versionRef('errorprone-core')
+
+            plugin('spotless', 'com.diffplug.spotless').versionRef('spotless-plugin')
+            plugin('errorprone', 'net.ltgt.errorprone').versionRef('errorprone-plugin')
+        }
+    }
+}
+
+include 'taskcomm-autoconfigure'
+include 'taskcomm-spring-boot-starter'

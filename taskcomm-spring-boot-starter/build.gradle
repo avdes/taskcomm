@@ -1,0 +1,7 @@
+// Ни одного класса (docs/adr/0001-module-layout.md) — только список зависимостей. Класс,
+// попавший в этот модуль, — ошибка: смысл модуля именно в том, что он только объявляет api.
+dependencies {
+    api project(':taskcomm-autoconfigure')
+    api platform(libs.spring.boot.bom)
+    api libs.spring.boot.starter
+}

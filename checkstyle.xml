@@ -35,7 +35,12 @@
     <!-- Требует package-info.java. Подавлено для internal и тестов, см. checkstyle-suppressions.xml -->
     <module name="JavadocPackage"/>
     <module name="SuppressionFilter">
-        <property name="file" value="${config_loc}/checkstyle-suppressions.xml"/>
+        <!--
+            Не ${config_loc}: начиная с Gradle 9 плагин checkstyle сам владеет этим свойством
+            и запрещает задавать его вручную через configProperties (см. build.gradle модуля
+            taskcomm-autoconfigure). Имя своё, чтобы не конфликтовать.
+        -->
+        <property name="file" value="${taskcomm_config_dir}/checkstyle-suppressions.xml"/>
         <property name="optional" value="true"/>
     </module>
     <module name="TreeWalker">
@@ -186,7 +191,9 @@
 
         <!-- Javadoc -->
         <module name="JavadocType"/>
-        <module name="JavadocStyle"/>
+        <!-- JavadocStyle убран в Checkstyle 14.0.0 (см. release notes) — его функциональность
+             (в т.ч. краткое описание первым предложением) теперь целиком покрывает SummaryJavadoc
+             ниже. -->
         <module name="JavadocMethod">
             <property name="accessModifiers" value="public"/>
             <property name="allowMissingParamTags" value="true"/>

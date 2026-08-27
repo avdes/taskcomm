@@ -11,18 +11,20 @@
 
 ## 0. Скелет проекта
 
-- [ ] Уточнить актуальные версии Gradle, Checkstyle, Spotless, Error Prone, ArchUnit
+- [x] Уточнить актуальные версии Gradle, Checkstyle, Spotless, Error Prone, ArchUnit
       и записать их в CLAUDE.md
-- [ ] `settings.gradle` с version catalog, два `build.gradle`, Gradle wrapper
-- [ ] Java 21 toolchain, Spring Boot, Lombok, MapStruct с `lombok-mapstruct-binding`
-- [ ] Spotless (palantir-java-format), Checkstyle, Error Prone
-- [ ] `.gitignore`, `.editorconfig`, `.gitattributes`
-- [ ] Структура пакетов с `package-info.java` в каждом
-- [ ] Пустая `@AutoConfiguration` и `AutoConfiguration.imports`
-- [ ] ArchUnit-тест на границы `internal`
-- [ ] Тест на `ApplicationContextRunner`: бины по умолчанию, выключение свойством, переопределение
+- [x] `settings.gradle` с version catalog, два `build.gradle`, Gradle wrapper
+- [x] Java 21 toolchain, Spring Boot, Lombok, MapStruct с `lombok-mapstruct-binding`
+- [x] Spotless (palantir-java-format), Checkstyle, Error Prone
+- [x] `.gitignore`, `.editorconfig`, `.gitattributes`
+- [x] Структура пакетов с `package-info.java` в каждом
+- [x] Пустая `@AutoConfiguration` и `AutoConfiguration.imports`
+- [x] ArchUnit-тест на границы `internal`
+- [x] Тест на `ApplicationContextRunner`: бины по умолчанию, выключение свойством, переопределение
 
 **Готово, когда** `gradlew.bat build` проходит целиком и `publishToMavenLocal` кладёт оба артефакта.
+Проверено локально (JDK 21 из `~/.jdks/ms-21.0.12`, Gradle wrapper 9.7.1) — оба условия выполнены,
+оба артефакта лежат в `~/.m2/repository/xyz/avasilev/`.
 
 ## 1. Схема БД
 
@@ -40,6 +42,10 @@
 - [ ] `TaskProcessor` и три наследника
 - [ ] `Emitter`, контекст выполнения, `SearchableField`
 - [ ] `TaskService`, `TaskRepository` (SPI)
+- [ ] Снять `allowEmptyShould(true)` с двух правил в `ArchitectureTest` — на этапе 0 пакеты
+      `api`/`internal` пусты (`package-info.java` без аннотаций не даёт `.class`), и правила
+      про них проходят вхолостую. Как только появятся настоящие классы, послабление обязано
+      уйти, иначе правило продолжит молча ничего не проверять
 
 **Готово, когда** потребитель может скомпилировать процессор, ничего не запуская.
 
