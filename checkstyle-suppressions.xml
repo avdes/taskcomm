@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<!DOCTYPE suppressions PUBLIC
+        "-//Checkstyle//DTD SuppressionFilter Configuration 1.2//EN"
+        "https://checkstyle.org/dtds/suppressions_1_2.dtd">
+<!--
+    Точечные исключения из checkstyle.xml. Каждое — с причиной: без объяснения
+    исключение через полгода выглядит как чья-то лень и его молча снимают.
+-->
+<suppressions>
+
+    <!--
+        package-info.java требуется только в публичных api-пакетах: их Javadoc читает
+        потребитель библиотеки. Для internal это церемония без адресата.
+    -->
+    <suppress checks="JavadocPackage" files="[\\/]internal[\\/]"/>
+
+    <!--
+        Тесты не документируются пакетами.
+    -->
+    <suppress checks="JavadocPackage" files="[\\/]src[\\/]test[\\/]"/>
+
+</suppressions>

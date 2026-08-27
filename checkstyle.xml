@@ -1,0 +1,221 @@
+<?xml version="1.0"?>
+<!DOCTYPE module PUBLIC
+        "-//Checkstyle//DTD Checkstyle Configuration 1.3//EN"
+        "https://checkstyle.org/dtds/configuration_1_3.dtd">
+<!--
+    Граница ответственности:
+      Spotless (palantir-java-format) — отступы, переносы, пробелы, положение скобок,
+                                        порядок импортов, длина строки, висячие запятые.
+      Checkstyle                      — всё остальное: именование, структура, сложность,
+                                        Javadoc, корректность, лишние импорты.
+
+    Форматные правила отсюда сознательно убраны: два источника правды об одном
+    приводят к тому, что Checkstyle ругается на строку, которую только что записал Spotless.
+
+    Отдельно убраны, не как форматные:
+      MissingSwitchDefault — воркер разбирает запечатанную иерархию процессоров без ветки
+                             default, чтобы новый подтип ломал компиляцию (см. docs/adr/0007).
+      IllegalCatch         — воркер обязан перехватывать всё, что бросил процессор потребителя,
+                             иначе чужой код убьёт поток воркера.
+-->
+<module name="Checker">
+    <property name="charset" value="UTF-8"/>
+    <property name="severity" value="error"/>
+    <property name="fileExtensions" value="java"/>
+    <module name="BeforeExecutionExclusionFileFilter">
+        <property name="fileNamePattern" value="module\-info\.java$"/>
+    </module>
+    <module name="SuppressWarningsFilter"/>
+    <module name="FileLength"/>
+    <module name="Header">
+        <property name="header" value=""/>
+        <property name="fileExtensions" value="java"/>
+    </module>
+    <module name="NewlineAtEndOfFile"/>
+    <!-- Требует package-info.java. Подавлено для internal и тестов, см. checkstyle-suppressions.xml -->
+    <module name="JavadocPackage"/>
+    <module name="SuppressionFilter">
+        <property name="file" value="${config_loc}/checkstyle-suppressions.xml"/>
+        <property name="optional" value="true"/>
+    </module>
+    <module name="TreeWalker">
+        <module name="SuppressWarningsHolder"/>
+
+        <!-- Структура и дизайн -->
+        <module name="AbstractClassName">
+            <property name="ignoreName" value="true"/>
+        </module>
+        <module name="AnonInnerLength"/>
+        <module name="AvoidNestedBlocks"/>
+        <module name="DeclarationOrder"/>
+        <module name="HideUtilityClassConstructor"/>
+        <module name="InnerTypeLast"/>
+        <module name="InterfaceIsType"/>
+        <module name="OneTopLevelClass"/>
+        <module name="OuterTypeFilename"/>
+        <module name="OuterTypeNumber"/>
+        <module name="PackageAnnotation"/>
+        <module name="PackageDeclaration"/>
+        <module name="RedundantModifier"/>
+        <module name="ModifierOrder"/>
+        <module name="MutableException"/>
+        <module name="UncommentedMain"/>
+
+        <!-- Сложность -->
+        <module name="BooleanExpressionComplexity"/>
+        <module name="ClassDataAbstractionCoupling">
+            <property name="max" value="15"/>
+        </module>
+        <module name="ClassFanOutComplexity">
+            <property name="max" value="30"/>
+        </module>
+        <module name="CyclomaticComplexity"/>
+        <module name="NPathComplexity"/>
+        <module name="JavaNCSS"/>
+        <module name="ExecutableStatementCount"/>
+        <module name="MethodCount"/>
+        <module name="MethodLength"/>
+        <module name="LambdaBodyLength">
+            <property name="max" value="30"/>
+        </module>
+        <module name="NestedForDepth"/>
+        <module name="NestedIfDepth"/>
+        <module name="NestedTryDepth"/>
+        <module name="ParameterNumber">
+            <property name="max" value="12"/>
+            <property name="ignoreOverriddenMethods" value="true"/>
+        </module>
+        <module name="RecordComponentNumber"/>
+        <module name="ReturnCount">
+            <property name="max" value="3"/>
+        </module>
+        <module name="ThrowsCount"/>
+
+        <!-- Корректность -->
+        <module name="CovariantEquals"/>
+        <module name="EqualsAvoidNull"/>
+        <module name="EqualsHashCode"/>
+        <module name="StringLiteralEquality"/>
+        <module name="MissingOverride"/>
+        <module name="MissingDeprecated"/>
+        <module name="SuperClone"/>
+        <module name="SuperFinalize"/>
+        <module name="NoClone"/>
+        <module name="NoFinalizer"/>
+        <module name="FallThrough"/>
+        <module name="DefaultComesLast"/>
+        <module name="ExplicitInitialization"/>
+        <module name="InnerAssignment"/>
+        <module name="ModifiedControlVariable"/>
+        <module name="ParameterAssignment"/>
+        <module name="SimplifyBooleanExpression"/>
+        <module name="SimplifyBooleanReturn"/>
+        <module name="UnnecessaryParentheses"/>
+        <module name="UnnecessarySemicolonInEnumeration"/>
+        <module name="UnnecessarySemicolonInTryWithResources"/>
+        <module name="UnnecessarySemicolonAfterOuterTypeDeclaration"/>
+        <module name="UnnecessarySemicolonAfterTypeMemberDeclaration"/>
+        <module name="UnusedLocalVariable"/>
+        <module name="VariableDeclarationUsageDistance"/>
+        <module name="IllegalInstantiation"/>
+        <module name="IllegalThrows"/>
+        <module name="IllegalType"/>
+        <module name="IllegalToken"/>
+        <module name="IllegalTokenText"/>
+        <module name="DescendantToken"/>
+        <module name="AvoidDoubleBraceInitialization"/>
+        <module name="AvoidNoArgumentSuperConstructorCall"/>
+        <module name="EmptyStatement"/>
+        <module name="EmptyBlock"/>
+        <module name="EmptyCatchBlock">
+            <property name="exceptionVariableName" value="expected"/>
+        </module>
+        <module name="NeedBraces"/>
+        <module name="OneStatementPerLine"/>
+        <module name="MultipleVariableDeclarations"/>
+        <module name="ArrayTypeStyle"/>
+        <module name="UpperEll"/>
+        <module name="NoCodeInFile"/>
+        <module name="AvoidEscapedUnicodeCharacters"/>
+        <module name="FinalLocalVariable"/>
+        <module name="FinalParameters"/>
+        <module name="RequireThis"/>
+        <module name="SuppressWarnings"/>
+        <module name="TodoComment">
+            <property name="format" value="(// TODO:)|(\* TODO:)"/>
+        </module>
+
+        <!-- Импорты (порядок — за форматтером, здесь только состав) -->
+        <module name="AvoidStarImport"/>
+        <module name="UnusedImports"/>
+        <module name="RedundantImport"/>
+        <module name="IllegalImport">
+            <property name="regexp" value="true"/>
+            <property name="illegalClasses"
+                      value="^org\.springframework\.lang\.(NonNull|Nullable), ^org\.jetbrains\.annotations\.(NotNull|Nullable),
+                ^io\.micrometer\.core\.lang\.(NonNull|Nullable),
+                ^org\.elasticsearch\.common\.Nullable, ^org\.apache\.thrift\.annotation\.Nullable,
+                ^org\.junit\.Test, ^org\.junit\.jupiter\.api\.Assertions, ^org\.junit\.Test, ^org\.junit\.jupiter\.api\.Assertions\..*"/>
+        </module>
+
+        <!-- Именование -->
+        <module name="PackageName"/>
+        <module name="TypeName"/>
+        <module name="MethodName"/>
+        <module name="ConstantName"/>
+        <module name="StaticVariableName"/>
+        <module name="ParameterName"/>
+        <module name="LambdaParameterName"/>
+        <module name="CatchParameterName"/>
+        <module name="LocalVariableName"/>
+        <module name="LocalFinalVariableName"/>
+        <module name="PatternVariableName"/>
+        <module name="ClassTypeParameterName"/>
+        <module name="RecordComponentName"/>
+        <module name="RecordTypeParameterName"/>
+        <module name="MethodTypeParameterName"/>
+        <module name="InterfaceTypeParameterName"/>
+        <module name="IllegalIdentifierName"/>
+        <module name="AbbreviationAsWordInName">
+            <property name="ignoreFinal" value="false"/>
+            <property name="allowedAbbreviationLength" value="0"/>
+            <property name="allowedAbbreviations" value="SSD"/>
+            <property name="tokens"
+                      value="CLASS_DEF, INTERFACE_DEF, ENUM_DEF, ANNOTATION_DEF, ANNOTATION_FIELD_DEF, PARAMETER_DEF, VARIABLE_DEF, METHOD_DEF, PATTERN_VARIABLE_DEF, RECORD_DEF, RECORD_COMPONENT_DEF"/>
+        </module>
+
+        <!-- Javadoc -->
+        <module name="JavadocType"/>
+        <module name="JavadocStyle"/>
+        <module name="JavadocMethod">
+            <property name="accessModifiers" value="public"/>
+            <property name="allowMissingParamTags" value="true"/>
+            <property name="allowMissingReturnTag" value="true"/>
+            <property name="allowedAnnotations" value="Override, Test"/>
+            <property name="tokens" value="METHOD_DEF, CTOR_DEF, ANNOTATION_FIELD_DEF, COMPACT_CTOR_DEF"/>
+        </module>
+        <module name="MissingJavadocPackage"/>
+        <module name="InvalidJavadocPosition"/>
+        <module name="JavadocBlockTagLocation"/>
+        <module name="JavadocContentLocationCheck"/>
+        <module name="JavadocMissingLeadingAsterisk"/>
+        <module name="JavadocMissingWhitespaceAfterAsterisk"/>
+        <module name="JavadocTagContinuationIndentation"/>
+        <module name="NonEmptyAtclauseDescription"/>
+        <module name="SingleLineJavadoc"/>
+        <module name="SummaryJavadoc">
+            <property name="forbiddenSummaryFragments"
+                      value="^@return the *|^This method returns |^A [{]@code [a-zA-Z0-9]+[}]( is a )"/>
+        </module>
+        <module name="RequireEmptyLineBeforeBlockTagGroup"/>
+        <module name="AtclauseOrder">
+            <property name="tagOrder" value="@param, @return, @throws, @deprecated"/>
+            <property name="target" value="CLASS_DEF, INTERFACE_DEF, ENUM_DEF, METHOD_DEF, CTOR_DEF, VARIABLE_DEF"/>
+        </module>
+
+        <!-- Аннотации -->
+        <module name="AnnotationUseStyle">
+            <property name="elementStyle" value="COMPACT"/>
+        </module>
+    </module>
+</module>
