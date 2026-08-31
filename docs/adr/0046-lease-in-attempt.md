@@ -8,6 +8,8 @@
   ниже остаётся в силе для задач.
 - **Изменено:** [0055](0055-communication-exchange-storage.md) — в перечне колонок сущности
   `payload` у коммуникаций называется `request_payload`, а строка попытки несёт ещё и обмен.
+- **Изменено:** [0057](0057-attempt-status-columns.md) — `outcome` и `failure_reason`
+  переименованы в `status` и `status_description`.
 
 ## Контекст
 
