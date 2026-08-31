@@ -76,11 +76,11 @@ taskcomm:
 | Термин | Что это |
 |---|---|
 | **Дело** (`Execution`) | Набор связанных действий вокруг одного повода. Агрегат над задачами и коммуникациями |
-| **Задача** (`Task<P>`) | Что нужно сделать над множеством бизнес-объектов. `P` — параметры операции: диапазон дат, контрагент, режим |
+| **Задача** (`Task<T>`) | Что нужно сделать над множеством бизнес-объектов. `T` — параметры операции: диапазон дат, контрагент, режим |
 | **Группа** (`TaskBatch<B>`) | Часть задачи. `B` — параметры группы. Существует, чтобы сходить во внешнюю систему один раз на всю группу |
 | **Подзадача** (`TaskUnit<U>`) | Обработка **одного** бизнес-объекта. `U` — сам объект. Минимальная единица работы и повтора |
-| **Процессор задачи** (`TaskProcessor<P>`) | Ваш код. Запечатанный базовый контракт с тремя наследниками |
-| **Коммуникация** (`Communication<P>`) | Обмен с внешней системой. **Атомарна**, на части не делится |
+| **Процессор задачи** (`TaskProcessor<T>`) | Ваш код. Запечатанный базовый контракт с тремя наследниками |
+| **Коммуникация** (`Communication<C>`) | Обмен с внешней системой. **Атомарна**, на части не делится |
 | **Процессор коммуникации** | Ваш код. Фактически адаптер к одной внешней системе |
 | **Тип задачи** (`taskType`) | Строка, по которой ищется процессор. Ключ всей системы |
 | **Аренда** | Право экземпляра приложения работать над строкой в течение ограниченного времени |
@@ -142,16 +142,19 @@ taskcomm:
 
 ```java
 @Component
-public class ReportProcessor implements FlatTaskProcessor<ReportParams> {
+public class ReportProcessor implements FlatTaskProcessor<ReportParams, ReportSummary> {
 
     @Override public String taskType() { return "monthly-report"; }
 
     @Override
-    public void process(Task<ReportParams> task) {
-        // одна операция от начала до конца
+    public ReportSummary process(Task<ReportParams> task, ProcessingContext context) {
+        // одна операция от начала до конца; вернули не null — результат сохранён
+        return new ReportSummary(rows, bytes);
     }
 }
 ```
+
+Не нужен результат — поставьте `Void` вторым параметром и возвращайте `null`.
 
 **Когда:** разовая операция без естественного деления. Сформировать отчёт, пересчитать агрегат,
 выгрузить один файл.
@@ -162,19 +165,30 @@ public class ReportProcessor implements FlatTaskProcessor<ReportParams> {
 
 ```java
 @Component
-public class OrderSyncProcessor implements UnitTaskProcessor<SyncPeriod, OrderRef> {
+public class OrderSyncProcessor
+        implements UnitTaskProcessor<SyncPeriod, OrderRef, OrderOutcome, SyncSummary> {
 
     @Override public String taskType() { return "order-sync"; }
 
     @Override
-    public void expand(Task<SyncPeriod> task, Emitter<OrderRef> units) {
+    public void expand(Task<SyncPeriod> task, Emitter<OrderRef> units, ProcessingContext context) {
         orderRepository.streamIds(task.payload().from(), task.payload().to())
                 .forEach(id -> units.emit(new OrderRef(id)));
     }
 
     @Override
-    public void process(TaskUnit<OrderRef> unit) {
+    public OrderOutcome process(TaskUnit<OrderRef> unit, ProcessingContext context) {
         // обработка одного заказа
+        return new OrderOutcome(unit.payload().id(), Status.SYNCED);
+    }
+
+    @Override
+    public SyncSummary collect(
+            Task<SyncPeriod> task,
+            Stream<CollectedUnit<OrderRef, OrderOutcome>> units,
+            ProcessingContext context) {
+        // поток ленивый: заказов может быть миллион
+        return units.reduce(SyncSummary.empty(), SyncSummary::plus, SyncSummary::plus);
     }
 }
 ```
@@ -188,29 +202,58 @@ public class OrderSyncProcessor implements UnitTaskProcessor<SyncPeriod, OrderRe
 
 ```java
 @Component
-public class PriceUpdateProcessor
-        implements BatchTaskProcessor<UpdateParams, SupplierBatch, ItemPrice> {
+public class PriceUpdateProcessor implements BatchTaskProcessor<
+        UpdateParams,     // T  — параметры задачи
+        SupplierBatch,    // B  — параметры группы
+        ItemPrice,        // U  — один товар
+        ItemOutcome,      // RU — что вышло с товаром
+        SupplierReport,   // RB — свод по поставщику
+        UpdateReport> {   // RT — свод по задаче
 
     @Override public String taskType() { return "price-update"; }
 
     @Override
-    public void expand(Task<UpdateParams> task, Emitter<SupplierBatch> batches) {
+    public void expand(
+            Task<UpdateParams> task, Emitter<SupplierBatch> batches, ProcessingContext context) {
         suppliers.forEach(s -> batches.emit(new SupplierBatch(s.id())));
     }
 
     @Override
-    public void expandBatch(TaskBatch<SupplierBatch> batch, Emitter<ItemPrice> units) {
+    public void expandBatch(
+            TaskBatch<SupplierBatch> batch, Emitter<ItemPrice> units, ProcessingContext context) {
         // один поход во внешнюю систему на всю группу
         PriceList list = supplierApi.fetchPriceList(batch.payload().supplierId());
         list.items().forEach(i -> units.emit(new ItemPrice(i.sku(), i.price())));
     }
 
     @Override
-    public void process(TaskUnit<ItemPrice> unit) {
+    public ItemOutcome process(TaskUnit<ItemPrice> unit, ProcessingContext context) {
         // применение одной цены; данные уже внутри unit
+        return new ItemOutcome(unit.payload().sku(), applied);
+    }
+
+    @Override
+    public SupplierReport collectBatch(
+            TaskBatch<SupplierBatch> batch,
+            Stream<CollectedUnit<ItemPrice, ItemOutcome>> units,
+            ProcessingContext context) {
+        // в потоке ВСЕ терминальные подзадачи — и упавшие тоже, со своим статусом
+        return SupplierReport.of(batch.payload().supplierId(), units);
+    }
+
+    @Override
+    public UpdateReport collect(
+            Task<UpdateParams> task,
+            Stream<CollectedBatch<SupplierBatch, SupplierReport>> batches,
+            ProcessingContext context) {
+        return UpdateReport.of(batches);
     }
 }
 ```
+
+Шесть параметров типа читаются тяжело — поэтому комментарий к каждому не украшение, а часть
+контракта. Уровни задачи, группы и подзадачи возвращают **разные** типы: свод по задаче
+и результат одного товара не имеют между собой ничего общего.
 
 **Когда:** обработка каждого объекта требует общих данных, которые дорого получать поштучно.
 Прайс-лист на тысячу позиций, справочник курсов, пакетный ответ внешнего API.
@@ -240,6 +283,12 @@ Task ─process─────────────────────�
 Обратная половина каскада — **сборка**: когда дети закончились, родитель получает их результаты
 и сводит в свой. Правило простое: **есть `expand` — есть и `collect`.** У плоской задачи нет
 ни того, ни другого.
+
+В поток сборки идут **все терминальные дети**, а не только успешные: каждый обёрнут в
+`CollectedUnit` или `CollectedBatch` с id, нагрузкой, результатом, статусом и его описанием.
+Иначе сводку при `WARNING` было бы не составить — упавшие объекты остались бы безымянными.
+Результаты хранятся в отдельной таблице и живут до `taskcomm.results.discard`; само раскрытие
+результата не возвращает — оно уже отдаёт детей в `Emitter`.
 
 **Дети принадлежат попытке раскрытия, а не родителю.** Повторное раскрытие ничего не удаляет —
 новая попытка порождает свой набор детей, прежний остаётся при своей попытке. Отсюда и то,
@@ -304,18 +353,21 @@ PENDING ──захват──> RUNNING ──> AWAITING_CHILDREN ──> SUCC
 
 ```java
 @Override
-public void process(TaskUnit<OrderRef> unit) {
+public OrderOutcome process(TaskUnit<OrderRef> unit, ProcessingContext context) {
     if (alreadySynced(unit.payload())) {
         context.skip("заказ уже синхронизирован");
-        return;
+        return null;                     // вернули null — результат не сохранён
     }
     ...
 }
 ```
 
-`skip(reason)` — **единственный** канал пропуска. Методы процессора возвращают результат, но это
+`skip(reason)` — **единственный** канал пропуска. `process` и `collect` возвращают результат, но это
 данные, а не исход: успех по-прежнему выражен отсутствием исключения. Пропуск засчитывается, только
 если метод вернулся нормально; исключение перебивает пропуск; причина обязательна и сохраняется.
+
+Пропуск и результат независимы: можно вызвать `skip()` и всё равно вернуть значение — оно
+сохранится и придёт в сборку. **Не сохраняется только `null`.**
 
 ### Отмена
 
@@ -497,9 +549,9 @@ public void createOrder(OrderRequest request) {
 Направление — **тип, а не значение поля**:
 
 ```java
-public sealed interface Communication<P> {
-    record Inbound<P>(String source, P requestPayload)       implements Communication<P> {}
-    record Outbound<P>(String destination, P requestPayload) implements Communication<P> {}
+public sealed interface Communication<C> {
+    record Inbound<C>(String source, C requestPayload)       implements Communication<C> {}
+    record Outbound<C>(String destination, C requestPayload) implements Communication<C> {}
 }
 ```
 
@@ -516,7 +568,7 @@ matching. Нагрузка называется `requestPayload`, потому �
 Какой из контрактов реализовать, определяет способ интеграции, а не конфигурация:
 
 ```
-CommunicationProcessor<P, R>
+CommunicationProcessor<C, R>
 ├── HttpCommunicationProcessor
 │   ├── RestCommunicationProcessor
 │   └── SoapCommunicationProcessor

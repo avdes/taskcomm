@@ -5,6 +5,10 @@
 - **Изменено:** [0045](0045-flat-task-processor.md) — `SimpleTaskProcessor` переименован
   в **`FlatTaskProcessor`**, чтобы имя интерфейса совпадало со значением `contract_shape` = `FLAT`.
   В теле ниже сохранено прежнее имя, оно встречается в четырёх местах.
+- **Изменено:** [0059](0059-collect-contract.md) — параметры типа расширены результатами
+  и переименованы: `FlatTaskProcessor<T, RT>`, `UnitTaskProcessor<T, U, RU, RT>`,
+  `BatchTaskProcessor<T, B, U, RU, RB, RT>`. Буква совпадает с уровнем: `Task<P>` стал `Task<T>`.
+  Запечатанность и разбор без ветки `default` в силе.
 
 ## Контекст
 
