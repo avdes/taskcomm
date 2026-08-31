@@ -46,16 +46,18 @@
 
 ## 2. Публичный API задач
 
-- [ ] `Execution`, `ExecutionRepository` (SPI)
+- [ ] `Execution`, `ExecutionRef`, `ExecutionRepository` (SPI)
 - [ ] Решить, нужен ли `ExecutionService` и что он делает: агрегат по
       [ADR 0038](adr/0038-execution-aggregate.md) пассивен и неявен. Кандидат в первые применения
       появился — открытый вопрос 6 в [CLAUDE.md](../CLAUDE.md): процессору в `collect` нужны данные
       породившей его коммуникации, а путь к ним есть только через состав дела
 - [ ] `Task`, `TaskBatch`, `TaskUnit`, статусы
 - [ ] `TaskProcessor` и три наследника
-- [ ] `Emitter`, контекст обработки (в нём же текущий `Execution`), `SearchableField`
+- [ ] `Emitter`, контекст обработки (в нём же текущий `Execution`, наружу — `executionRef()`),
+      `SearchableField`
 - [ ] `collect` у `UnitTaskProcessor` и `BatchTaskProcessor`; возвращаемые значения вместо `void`
-- [ ] Явный отказ от наследования `Execution` при создании сущности
+- [ ] Явный отказ от наследования `Execution` при создании сущности; явная передача дела
+      необязательным `ExecutionRef` в методах создания ([ADR 0056](adr/0056-execution-ref.md))
 - [ ] `TaskService`, `TaskRepository` (SPI); необязательное «не раньше» при постановке
 - [ ] Снять `allowEmptyShould(true)` с двух правил в `ArchitectureTest` — на этапе 0 пакеты
       `api`/`internal` пусты (`package-info.java` без аннотаций не даёт `.class`), и правила
@@ -104,8 +106,8 @@
       самозапускающегося билдера; неразбираемое тело — сразу `FAILED` с ответом от callback'а
 - [ ] Хранение обмена в строке попытки: десять колонок, тела в `text` (двоичное — base64),
       копирование `request_*` при повторе входящей, индекс по `request_id`
-- [ ] `CommunicationContext` — свой тип: `skip(reason)`, «продолжать ли», запись обмена короткими
-      транзакциями
+- [ ] `CommunicationContext` — свой тип: `skip(reason)`, «продолжать ли», `executionRef()`,
+      запись обмена короткими транзакциями
 - [ ] Дедупликация через `tc_communication_dedup`
 - [ ] Реестр корреляции `tc_communication_correlation`: регистрация при создании и из процессора,
       привязка колбэка к `Execution` якоря, WARN на дропнутую партицию и на занятый ключ
