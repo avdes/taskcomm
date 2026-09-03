@@ -40,7 +40,9 @@
       ([ADR 0058](adr/0058-task-result-storage.md))
 - [ ] Непартиционированные справочники `tc_communication_dedup`,
       `tc_communication_correlation` и `tc_searchable_field`
-- [ ] Индексы по сводному списку из CLAUDE.md
+- [ ] Колонки `priority` и `claim_order_at` в четырёх подчинённых таблицах
+      ([ADR 0063](adr/0063-claim-ordering-and-pollers.md))
+- [ ] Индексы по сводному списку из CLAUDE.md, включая **три** частичных под формы захвата
 - [ ] `taskcomm.schema.initialize` через `DataSourceScriptDatabaseInitializer`
 - [ ] Проверка схемы при старте с внятным сообщением
 
@@ -51,14 +53,16 @@
 - [ ] `Execution`, `ExecutionRef`, `ExecutionRepository` (SPI)
 - [ ] Решить, нужен ли `ExecutionService` и что он делает: агрегат по
       [ADR 0038](adr/0038-execution-aggregate.md) пассивен и неявен. Кандидат в первые применения
-      появился — открытый вопрос 6 в [CLAUDE.md](../CLAUDE.md): процессору в `collect` нужны данные
+      появился — открытый вопрос 4 в [CLAUDE.md](../CLAUDE.md): процессору в `collect` нужны данные
       породившей его коммуникации, а путь к ним есть только через состав дела
 - [ ] `Task`, `TaskBatch`, `TaskUnit`, статусы
 - [ ] `TaskProcessor` и три наследника с полным набором параметров типа:
       `FlatTaskProcessor<T, RT>`, `UnitTaskProcessor<T, U, RU, RT>`,
       `BatchTaskProcessor<T, B, U, RU, RB, RT>` ([ADR 0059](adr/0059-collect-contract.md))
-- [ ] `Emitter`, контекст обработки (в нём же текущий `Execution`, наружу — `executionRef()`),
-      `SearchableField`. Контекст — параметр каждого метода процессора, а не поле
+- [ ] `Emitter`, контекст обработки: `skip(reason)`, `doNotRetry(reason)`, `shouldStop()`,
+      `executionRef()`, `SearchableField`. Контекст — параметр каждого метода процессора, а не поле
+- [ ] Аннотации настроек на процессоре — на классе и на методе
+      ([ADR 0061](adr/0061-processor-configuration-annotations.md))
 - [ ] `collect` и `collectBatch`; возвращаемые значения у `process` и `collect`,
       `expand` остаётся `void`
 - [ ] Обёртки потока сборки `CollectedUnit` и `CollectedBatch`: id, нагрузка, результат, статус,
@@ -78,6 +82,10 @@
 - [ ] Реализация репозитория на `JdbcClient`
 - [ ] Захват по аренде: две ветки через `UNION ALL`, аренда в строке попытки, уникальный
       частичный индекс против двойного захвата
+- [ ] Три формы захвата (`deadline` | `priority` | `quota`) и вычисление `claim_order_at`
+      при каждой записи `next_attempt_at` ([ADR 0063](adr/0063-claim-ordering-and-pollers.md)).
+      План каждой формы проверить `EXPLAIN`
+- [ ] Выделенные поллеры по типам задач и внешним системам; основной исключает их типы
 - [ ] Heartbeat отдельным потоком на инстанс
 - [ ] Постановка задачи в транзакции потребителя
 
@@ -98,6 +106,11 @@
       ([ADR 0058](adr/0058-task-result-storage.md)). План проверить `EXPLAIN`
 - [ ] Очистка результатов по `taskcomm.results.discard` и отметка на сущности родителя
 - [ ] Повторы, backoff с джиттером, предел обработки
+- [ ] Разрешение настроек по пяти уровням, валидация при старте и **печать итоговых значений
+      по типам и фазам с указанием уровня** ([ADR 0060](adr/0060-retry-and-lease-configuration.md),
+      [ADR 0061](adr/0061-processor-configuration-annotations.md))
+- [ ] `doNotRetry(reason)` и `shouldStop()` в контекстах обеих подсистем
+      ([ADR 0062](adr/0062-non-retryable-failure.md))
 - [ ] Запись попытки при захвате и закрытие по завершении, исход `LEASE_LOST`
 - [ ] Переходы статусов, закрытие родителя, подстраховочный поллер
 - [ ] Отмена, `skip(reason)`, форма контракта и осиротевшие типы
@@ -118,7 +131,7 @@
       самозапускающегося билдера; неразбираемое тело — сразу `FAILED` с ответом от callback'а
 - [ ] Хранение обмена в строке попытки: десять колонок, тела в `text` (двоичное — base64),
       копирование `request_*` при повторе входящей, индекс по `request_id`
-- [ ] `CommunicationContext` — свой тип: `skip(reason)`, «продолжать ли», `executionRef()`,
+- [ ] `CommunicationContext` — свой тип: `skip(reason)`, `doNotRetry(reason)`, `shouldStop()`, `executionRef()`,
       запись обмена короткими транзакциями
 - [ ] Дедупликация через `tc_communication_dedup`
 - [ ] Реестр корреляции `tc_communication_correlation`: регистрация при создании и из процессора,
