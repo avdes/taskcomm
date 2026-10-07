@@ -2,6 +2,8 @@
 
 - **Дата:** 2026-09-03
 - **Статус:** принято
+- **Изменено:** [0066](0066-processor-settings-annotation-names.md) — аннотаций две, по одной
+  на подсистему: `@TaskProcessorSettings` и `@CommunicationProcessorSettings`.
 
 ## Контекст
 

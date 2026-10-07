@@ -2,6 +2,8 @@
 
 - **Дата:** 2026-08-28
 - **Статус:** принято
+- **Изменено:** [0039](0039-execution-partitioning.md) — первичный ключ всех четырёх таблиц теперь
+  `(execution_created_at, id)`, у `tc_execution` — `(created_at, id)`; колонки `task_created_at` нет
 
 ## Контекст
 
