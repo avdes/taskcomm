@@ -145,11 +145,15 @@ taskcomm:
 ([ADR 0080](../adr/0080-partition-configuration.md)): `create-ahead < 1`; `interval`
 или `retention` не положительные; `drop.enabled` при `manage: false`; границы существующих
 партиций не совпадают с `period` (при `manage: true`); нет партиции на `now()`, и создать её
-не удалось.
+не удалось. `DataSource` или менеджер транзакций не выбран однозначно: нет помеченного
+`@TaskcommDataSource` / `@TaskcommTransactionManager`, кандидатов несколько и ни одного
+`@Primary` — в сообщении список кандидатов; у выбранного менеджера виден его `DataSource`,
+и это не `DataSource` стартера ([ADR 0094](../adr/0094-creation-always-in-transaction.md)).
 
 **Предупреждение:** `heartbeat-interval > duration / 3` — громко и с рекомендуемым значением;
 `duration <= poll.interval`; `probe.timeout` меньше предела обработки
 системы; список исключений размыкателя задан у системы с выключенным размыкателем; запас партиций
 меньше `create-ahead` (и на каждом такте, пока не восполнен); `interval` партиций больше одного
-периода.
+периода; `DataSource` выбранного менеджера транзакций не виден (JTA) — громко, с просьбой
+проверить соответствие вручную.
 
