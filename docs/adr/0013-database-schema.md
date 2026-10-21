@@ -4,6 +4,10 @@
 - **Статус:** принято
 - **Изменено:** [0020](0020-partitioning.md) — из правила «стартер не выполняет DDL в проде»
   сделано исключение для создания и удаления партиций.
+- **Изменено:** [0085](0085-tests-on-real-postgres.md) — `taskcomm.schema.initialize` по умолчанию `never`: `embedded`
+  на PostgreSQL не срабатывает никогда. Для тестов — `always`.
+- **Изменено:** [0092](0092-jackson-3-liquibase-compatibility.md) — зависимости на Liquibase нет
+  вовсе, даже `optional`; changelog совместим с Liquibase 4.x и 5.x.
 
 ## Контекст
 

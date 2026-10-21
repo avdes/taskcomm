@@ -4,6 +4,8 @@
 - **Статус:** принято
 - **Изменено:** [0066](0066-processor-settings-annotation-names.md) — аннотаций две, по одной
   на подсистему: `@TaskProcessorSettings` и `@CommunicationProcessorSettings`.
+- **Изменено:** [0084](0084-priority-only-per-type.md) — приоритет задаётся только на классе и в `yaml` на уровне
+  типа; на методе и в `phases.*` — падение при старте. Остальные настройки на методе в силе.
 
 ## Контекст
 

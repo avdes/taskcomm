@@ -10,9 +10,11 @@ import org.springframework.context.annotation.Bean;
  * Корневая автоконфигурация стартера.
  *
  * <p>Подсистем здесь нет — только общий выключатель {@code taskcomm.enabled} и свойства под ним.
- * Задачи, коммуникации и REST получат собственные автоконфигурации с собственными выключателями
- * на следующих этапах плана (docs/roadmap.md); от корневой они не наследуются, а лишь идут после
- * неё по порядку через {@code @AutoConfiguration(after = ...)}.
+ * Задачи, коммуникации и REST получат собственные автоконфигурации на следующих этапах плана
+ * (docs/roadmap.md). Каждая из них стоит под составным условием «{@code taskcomm.enabled}
+ * и собственный выключатель подсистемы», поэтому {@code taskcomm.enabled=false} выключает всё
+ * (docs/adr/0090-root-switch-disables-everything.md). Порядок
+ * {@code @AutoConfiguration(after = ...)} включённость не передаёт — её передаёт только условие.
  *
  * @see TaskcommProperties
  */

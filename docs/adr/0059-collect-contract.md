@@ -2,6 +2,8 @@
 
 - **Дата:** 2026-08-31
 - **Статус:** принято
+- **Изменено:** [0068](0068-expansion-children-statuses.md) — `CollectedBatch` несёт `TaskBatchStatus`, а не `TaskStatus`:
+  перечисления задачи и группы разделены.
 
 ## Контекст
 

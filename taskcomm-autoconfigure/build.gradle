@@ -48,9 +48,9 @@ spotless {
     lineEndings = com.diffplug.spotless.LineEnding.GIT_ATTRIBUTES_FAST_ALLSAME
 
     java {
-        // Известная граблина (см. CLAUDE.md, «Каталог версий»): форматирование Java 21
-        // (sealed, pattern matching в switch, unnamed-паттерны) надёжно работает, только если
-        // Gradle daemon сам запущен на JDK 21 — держим JAVA_HOME на JDK 21 при сборке.
+        // Известная граблина (см. CLAUDE.md, «Каталог версий»): форматирование новых конструкций
+        // Java (sealed, pattern matching в switch, unnamed-паттерны) надёжно работает, только если
+        // Gradle daemon сам запущен на JDK версии toolchain — отсюда проверка JDK в settings.gradle.
         palantirJavaFormat(libs.versions.palantir.java.format.get())
         removeUnusedImports()
         importOrder()

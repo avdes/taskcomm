@@ -2,6 +2,8 @@
 
 - **Дата:** 2026-08-28
 - **Статус:** принято
+- **Изменено:** [0068](0068-expansion-children-statuses.md) — перечислений статусов стало четыре: `TaskStatus`,
+  `TaskBatchStatus`, `TaskUnitStatus`, `CommunicationStatus`. Тест сверки с `CHECK` покрывает все.
 
 ## Контекст
 

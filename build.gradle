@@ -11,11 +11,12 @@ subprojects {
     apply plugin: 'maven-publish'
 
     java {
-        // Java 21 — фиксированное решение проекта (CLAUDE.md), а не значение из каталога версий:
+        // Java 25 — фиксированное решение проекта (docs/adr/0088), а не значение из каталога версий:
         // обращение к version catalog из subprojects{} в корневом build.gradle помечено
         // deprecated в Gradle 9 (implicit lookup in parent projects, уйдёт в Gradle 10).
+        // Нижняя граница патча (25.0.4) проверяется в settings.gradle.
         toolchain {
-            languageVersion = JavaLanguageVersion.of(21)
+            languageVersion = JavaLanguageVersion.of(25)
         }
     }
 
