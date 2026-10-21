@@ -64,6 +64,7 @@ taskcomm:
   rest:
     enabled: false                  # выключен по умолчанию: пути надо закрыть самому
     base-path: /api/taskcomm
+    search-window: 30d              # окно чтения истории по времени создания дела
   schema:
     initialize: never               # never | embedded | always; для тестов — always
     partitions:                     # один набор на всю схему
@@ -151,7 +152,8 @@ taskcomm:
 и это не `DataSource` стартера ([ADR 0094](../adr/0094-creation-always-in-transaction.md)).
 Больше одного бина с одним квалификатором точки замены — `@TaskcommPayloadMapper`,
 `@TaskcommScheduler`, `@TaskcommWorkerThreadFactory`, `@TaskcommWorkerTaskDecorator`
-([ADR 0096](../adr/0096-no-foreign-type-beans.md)).
+([ADR 0096](../adr/0096-no-foreign-type-beans.md)). `rest.search-window` не положительный
+([ADR 0101](../adr/0101-active-partition-horizon.md)).
 
 **Предупреждение:** `heartbeat-interval > duration / 3` — громко и с рекомендуемым значением;
 `duration <= poll.interval`; `probe.timeout` меньше предела обработки
