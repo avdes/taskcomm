@@ -7,8 +7,8 @@
   `tc_task_unit`, `tc_communication`, две таблицы попыток — `tc_task_attempt`,
   `tc_communication_attempt`, — `tc_task_result` и ключи дедупликации `tc_communication_dedup`.
   Очистка — `DROP` партиции, а не `DELETE`. Справочники — `tc_communication_correlation`,
-  `tc_searchable_field` и `tc_partition_horizon` — не партиционируются. Всего таблиц в схеме
-  двенадцать.
+  `tc_searchable_field`, `tc_partition_horizon` и `tc_metrics_snapshot` — не партиционируются.
+  Всего таблиц в схеме тринадцать.
 - Таблицы попыток отдельной очистки **не получают**: они дропаются вместе с партицией своего
   агрегата. Хранить историю попыток дольше самих сущностей нельзя, короче — тоже.
 - **`tc_task_result` — единственная партиционированная таблица со своей очисткой**: строки из неё
