@@ -1,7 +1,6 @@
 package xyz.avasilev.taskcomm.autoconfigure;
 
 import org.springframework.boot.autoconfigure.AutoConfiguration;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -23,13 +22,12 @@ import org.springframework.context.annotation.Bean;
 public class TaskcommAutoConfiguration {
 
     /**
-     * Регистрирует {@link TaskcommProperties}, если потребитель не определил собственный бин
-     * такого типа.
+     * Регистрирует {@link TaskcommProperties}. Бин свойств не точка замены и потому объявляется
+     * без {@code @ConditionalOnMissingBean} (docs/adr/0096-no-foreign-type-beans.md).
      *
      * @return свойства стартера, связанные со значениями из {@code taskcomm.*}
      */
     @Bean
-    @ConditionalOnMissingBean
     @ConfigurationProperties(prefix = "taskcomm")
     public TaskcommProperties taskcommProperties() {
         return new TaskcommProperties();

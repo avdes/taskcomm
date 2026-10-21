@@ -2,19 +2,23 @@ package xyz.avasilev.taskcomm.autoconfigure;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.Arrays;
+import java.util.List;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ThreadFactory;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
+import org.springframework.core.task.TaskDecorator;
+import org.springframework.scheduling.TaskScheduler;
 
 /**
  * Обязательные сценарии для автоконфигурации (CLAUDE.md, раздел «Тесты»): бины создаются
- * по умолчанию, конфигурация выключается свойством, бин потребителя перекрывает наш — то есть
- * {@code @ConditionalOnMissingBean} действительно работает. У корневой автоконфигурации свой
- * выключатель и корневой {@code taskcomm.enabled} совпадают, поэтому сценарии «своим
- * {@code enabled=false}» и «корнем» здесь один тест; у автоконфигураций подсистем они разные
- * (docs/adr/0090-root-switch-disables-everything.md).
+ * по умолчанию, конфигурация выключается свойством, бинов чужих типов в контексте не появляется.
+ * У корневой автоконфигурации свой выключатель и корневой {@code taskcomm.enabled} совпадают,
+ * поэтому сценарии «своим {@code enabled=false}» и «корнем» здесь один тест; у автоконфигураций
+ * подсистем они разные (docs/adr/0090-root-switch-disables-everything.md). Точек замены у корневой
+ * автоконфигурации нет, и тестов на них здесь нет (docs/adr/0096-no-foreign-type-beans.md).
  */
 class TaskcommAutoConfigurationTest {
 
@@ -37,36 +41,29 @@ class TaskcommAutoConfigurationTest {
     }
 
     @Test
-    void backsOffWhenConsumerProvidesOwnBean() {
-        this.contextRunner
-                .withUserConfiguration(CustomPropertiesConfiguration.class)
-                .run(context -> {
-                    assertThat(context).hasSingleBean(TaskcommProperties.class);
-                    assertThat(context.getBean(TaskcommProperties.class))
-                            .isSameAs(CustomPropertiesConfiguration.CUSTOM_PROPERTIES);
-                });
+    void registersNoBeansOfForeignTypesItConsumes() {
+        this.contextRunner.run(context -> {
+            assertThat(context).doesNotHaveBean(Executor.class);
+            assertThat(context).doesNotHaveBean(TaskScheduler.class);
+            assertThat(context).doesNotHaveBean(ThreadFactory.class);
+            assertThat(context).doesNotHaveBean(TaskDecorator.class);
+
+            final List<String> jacksonBeans = Arrays.stream(context.getBeanDefinitionNames())
+                    .filter(name -> isJacksonType(context.getType(name)))
+                    .toList();
+            assertThat(jacksonBeans).isEmpty();
+        });
     }
 
     /**
-     * Конфигурация потребителя, объявляющая собственный бин {@link TaskcommProperties} —
-     * имитирует переопределение бина стартера в коде потребителя.
+     * Сравнивает по имени пакета, чтобы тест не зависел от наличия Jackson в classpath.
+     *
+     * @param type тип бина или {@code null}, если его не удалось определить
+     * @return {@code true}, если тип принадлежит Jackson 3 или Jackson 2
      */
-    @Configuration
-    static class CustomPropertiesConfiguration {
-
-        /**
-         * Экземпляр, который должен пережить автоконфигурацию стартера без изменений.
-         */
-        static final TaskcommProperties CUSTOM_PROPERTIES = new TaskcommProperties();
-
-        /**
-         * Имитирует бин потребителя, который обязан перекрыть бин стартера.
-         *
-         * @return фиксированный экземпляр {@link #CUSTOM_PROPERTIES}
-         */
-        @Bean
-        TaskcommProperties taskcommProperties() {
-            return CUSTOM_PROPERTIES;
-        }
+    private static boolean isJacksonType(final Class<?> type) {
+        return type != null
+                && (type.getName().startsWith("tools.jackson.")
+                        || type.getName().startsWith("com.fasterxml.jackson."));
     }
 }

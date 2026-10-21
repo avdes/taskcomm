@@ -198,12 +198,25 @@ gradlew.bat publishToMavenLocal
 - Автоконфигурации помечаются `@AutoConfiguration` и перечисляются в
   `taskcomm-autoconfigure/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports`.
   `spring.factories` для этого **не используется** — в Spring Boot 3 механизм удалён.
-- Каждый бин объявляется явным `@Bean`-методом. **`@ConditionalOnMissingBean` — только у бинов
-  публичных типов**: из `api` стартера или чужих библиотек (`ObjectMapper` нагрузки, планировщик
-  и пул воркеров, `RequestMatcher`). Список точек замены ведётся явно — здесь и в документации
-  потребителя. Бин внутреннего типа объявляется **без** условия: заменить его можно было бы, только
-  унаследовав класс из `internal`, и тогда внутренний тип стал бы API без обязательств
-  совместимости ([ADR 0089](docs/adr/0089-no-storage-spi-explicit-extension-points.md)).
+- Каждый бин объявляется явным `@Bean`-методом. Бин внутреннего типа — **без**
+  `@ConditionalOnMissingBean`: заменить его можно было бы, только унаследовав класс из `internal`,
+  и тогда внутренний тип стал бы API без обязательств совместимости
+  ([ADR 0089](docs/adr/0089-no-storage-spi-explicit-extension-points.md)). Классы свойств — тоже
+  без условия.
+- **Бинов чужих типов, которые стартер потребляет сам, он не регистрирует** — ни `JsonMapper`,
+  ни `TaskScheduler`, ни `Executor`, ни `ThreadFactory`, ни `TaskDecorator`
+  ([ADR 0096](docs/adr/0096-no-foreign-type-beans.md)). Бин такого типа вытесняет автоконфигурацию
+  Spring Boot или забирает `@Scheduled` / `@Async` потребителя. Маппер, планировщик и пулы —
+  поля внутренних бинов, остановка — их забота.
+- **Точки замены — бины потребителя с квалификатором стартера**, все необязательны; список
+  ведётся явно — здесь и в [consumer-contract.md](docs/consumer-contract.md):
+  `@TaskcommPayloadMapper` (`JsonMapper`), `@TaskcommScheduler` (`TaskScheduler`),
+  `@TaskcommWorkerThreadFactory` (`ThreadFactory`), `@TaskcommWorkerTaskDecorator`
+  (`TaskDecorator`). Отдельно — квалификаторы **выбора** `@TaskcommDataSource`
+  и `@TaskcommTransactionManager` ([ADR 0094](docs/adr/0094-creation-always-in-transaction.md)):
+  у них своего бина по умолчанию нет. Все квалификаторы — в `autoconfigure`.
+- **`RequestMatcher` — единственный бин чужого типа**, и стартер его отдаёт, а не потребляет:
+  имя `taskcommRequestMatcher`, без условий, только вместе с REST.
 - Каждая подсистема выключается свойством `taskcomm.<подсистема>.enabled`, а **все сразу —
   `taskcomm.enabled`** ([ADR 0090](docs/adr/0090-root-switch-disables-everything.md)). Автоконфигурация
   подсистемы стоит под **составным условием** «корень и подсистема», оба по умолчанию `true`;
@@ -215,7 +228,8 @@ gradlew.bat publishToMavenLocal
   образом; все бины создаются вручную.
 - **Не включать глобальные механизмы Spring за потребителя**: `@EnableScheduling`, `@EnableAsync`,
   `@EnableTransactionManagement` в автоконфигурациях запрещены — они меняют поведение всего
-  приложения. Нужен планировщик — создавай собственный `TaskScheduler`/executor-бин.
+  приложения. Нужен планировщик — держи собственный полем внутреннего бина, бином его
+  не регистрируй (см. выше).
 - Порядок конфигураций задаётся через `@AutoConfiguration(after = ..., before = ...)`.
 - Зависимости в `taskcomm-autoconfigure` объявляются как `compileOnly` / `optional`;
   реальные транзитивы собираются в `taskcomm-spring-boot-starter` через `api`.
@@ -336,10 +350,12 @@ public sealed interface Communication<C> {
   нет партиционирования с `ATTACH`, `jsonb`, `SKIP LOCKED` в семантике PostgreSQL, advisory-блокировок.
   Полный прогон требует Docker — локально и в CI; модульные тесты от него не зависят.
 - Автоконфигурации проверяются через `ApplicationContextRunner`. Для каждой автоконфигурации —
-  минимум четыре сценария: бины создаются по умолчанию; подсистема выключается своим
+  минимум три сценария: бины создаются по умолчанию; подсистема выключается своим
   `enabled=false`; подсистема выключается корневым `taskcomm.enabled=false`
-  ([ADR 0090](docs/adr/0090-root-switch-disables-everything.md)); бин потребителя перекрывает наш — **для каждой точки замены из списка**
-  (проверка, что `@ConditionalOnMissingBean` реально работает).
+  ([ADR 0090](docs/adr/0090-root-switch-disables-everything.md)). Плюс для **каждой точки замены
+  из списка** — помеченный квалификатором бин потребителя берётся вместо нашего, а бин того же
+  типа без квалификатора не берётся; и для каждой автоконфигурации — что бинов чужих типов она
+  в контекст не добавляет ([ADR 0096](docs/adr/0096-no-foreign-type-beans.md)).
 - ArchUnit-тест обязателен и проверяет ([ADR 0087](docs/adr/0087-architecture-rules.md)):
   - `internal` подсистемы используется только внутри неё и из `autoconfigure`, где бины
     собираются вручную;
