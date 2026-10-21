@@ -9,9 +9,12 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
- * Три обязательных сценария для автоконфигурации (CLAUDE.md, раздел «Тесты»): бины создаются
- * по умолчанию, подсистема выключается своим {@code enabled=false}, бин потребителя перекрывает
- * наш — то есть {@code @ConditionalOnMissingBean} действительно работает.
+ * Обязательные сценарии для автоконфигурации (CLAUDE.md, раздел «Тесты»): бины создаются
+ * по умолчанию, конфигурация выключается свойством, бин потребителя перекрывает наш — то есть
+ * {@code @ConditionalOnMissingBean} действительно работает. У корневой автоконфигурации свой
+ * выключатель и корневой {@code taskcomm.enabled} совпадают, поэтому сценарии «своим
+ * {@code enabled=false}» и «корнем» здесь один тест; у автоконфигураций подсистем они разные
+ * (docs/adr/0090-root-switch-disables-everything.md).
  */
 class TaskcommAutoConfigurationTest {
 

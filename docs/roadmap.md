@@ -29,9 +29,12 @@
 Проверено локально (JDK 21 из `~/.jdks/ms-21.0.12`, Gradle wrapper 9.7.1) — оба условия выполнены,
 оба артефакта лежат в `~/.m2/repository/xyz/avasilev/`.
 
-- [ ] Подъём базовой линии до Java 25 (JDK 25.0.4+) и Spring Boot 4.1.1
+- [x] Подъём базовой линии до Java 25 (JDK 25.0.4+) и Spring Boot 4.1.1
       ([ADR 0088](adr/0088-java-25-spring-boot-4.md)): toolchain, проверка JDK daemon
-      в `settings.gradle`, Lombok `1.18.48`, полный `gradlew.bat build` на JDK 25
+      в `settings.gradle`, Lombok `1.18.48`, полный `gradlew.bat build` на JDK 25.
+      Проверено локально (JDK 25.0.4.1 из `~/.jdks/ms-25.0.4.1`): `build publishToMavenLocal
+      --rerun-tasks` проходит целиком. Сборка на JDK 21 с этого момента невозможна — запись
+      о проверке на JDK 21 выше относится к прежней базовой линии.
 
 ## 1. Схема БД
 

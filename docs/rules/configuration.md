@@ -32,7 +32,8 @@ taskcomm:
       urgent: { types: [order-urgent], workers: 4, claim-order: priority }
   communication:
     enabled: true
-    poll: { interval: 1s, batch-size: 100, workers: 8 }
+    poll: { interval: 1s, batch-size: 100, workers: 8,
+            claim-order: deadline, deadline-step: 1m }   # deadline | priority | quota
     lease: { duration: 60s, heartbeat-interval: 20s, max-execution-time: 5m }
     retry: { max-attempts: 5, initial-delay: 10s, multiplier: 2.0, max-delay: 1h, jitter: 0.2 }
     response-timeout: 1h            # срок ожидания асинхронного ответа, потом повторная отправка
@@ -45,16 +46,21 @@ taskcomm:
       probe: { calls: 3, timeout: 1m }
     systems:                        # ключ — имя внешней системы
       supplier-b:
+        priority: 50
         rate-limit-per-instance: 10
         retry: { max-attempts: 8 }
         response-timeout: 4h
         failure-statuses: [5xx, 429]  # исход попытки, а не только размыкатель
         circuit-breaker: { enabled: true }
+    pollers:                        # дополнительные к основному, по именам внешних систем
+      supplier-b: { systems: [supplier-b], workers: 2 }
   search:
     remove-undeclared-fields: false
   results:
     discard: after   # never | immediately | after
     discard-after: 7d
+  logging:
+    mdc-prefix: tc.                 # префикс ключей MDC: tc.executionId, tc.taskId, ...
   rest:
     enabled: false                  # выключен по умолчанию: пути надо закрыть самому
     base-path: /api/taskcomm
