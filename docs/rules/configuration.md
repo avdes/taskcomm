@@ -137,7 +137,10 @@ taskcomm:
 **Падение при старте:** `max-attempts < 1`; `initial-delay > max-delay`; `multiplier < 1`;
 `jitter` вне `(0, 1]` — **включая ноль**, потому что джиттер объявлен обязательным
 ([ADR 0009](../adr/0009-retry-and-progress.md)) и настройка не должна выключать обязательное;
-`max-execution-time < heartbeat-interval`; `priority <= 0`; приоритет в аннотации на методе или
+`max-execution-time < heartbeat-interval`; `heartbeat-interval >= duration` — по каждому итоговому
+значению `duration` после разрешения по пяти уровням, то есть по каждому типу или системе и фазе;
+сообщение называет тип, фазу, уровень и рекомендуемый интервал
+([ADR 0103](../adr/0103-heartbeat-not-shorter-than-lease-fails.md)); `priority <= 0`; приоритет в аннотации на методе или
 в `yaml` на уровне фазы ([ADR 0084](../adr/0084-priority-only-per-type.md)); один тип задачи назван в двух поллерах.
 У размыкателя ([ADR 0065](../adr/0065-communication-circuit-breaker.md)): `failure-rate-threshold`
 вне `(0, 1]`; `minimum-calls < 1`; `probe.calls < 1`; `window` не положительное; для `wait` — те же
@@ -158,7 +161,8 @@ taskcomm:
 ([ADR 0101](../adr/0101-active-partition-horizon.md)). `metrics.interval` не положительный
 ([ADR 0102](../adr/0102-schema-wide-metrics-snapshot.md)).
 
-**Предупреждение:** `heartbeat-interval > duration / 3` — громко и с рекомендуемым значением;
+**Предупреждение:** `heartbeat-interval > duration / 3` (но меньше `duration`) — громко
+и с рекомендуемым значением, тоже по каждому итоговому `duration`;
 `duration <= poll.interval`; `probe.timeout` меньше предела обработки
 системы; список исключений размыкателя задан у системы с выключенным размыкателем; запас партиций
 меньше `create-ahead` (и на каждом такте, пока не восполнен); `interval` партиций больше одного

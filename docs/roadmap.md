@@ -186,7 +186,9 @@
 - [ ] Повторы, backoff с джиттером, предел обработки
 - [ ] Разрешение настроек по пяти уровням, валидация при старте и **печать итоговых значений
       по типам и фазам с указанием уровня** ([ADR 0060](adr/0060-retry-and-lease-configuration.md),
-      [ADR 0061](adr/0061-processor-configuration-annotations.md))
+      [ADR 0061](adr/0061-processor-configuration-annotations.md)); падение при
+      `heartbeat-interval >= duration` по каждому итоговому значению аренды, с типом, фазой
+      и уровнем в сообщении ([ADR 0103](adr/0103-heartbeat-not-shorter-than-lease-fails.md))
 - [ ] `doNotRetry(reason)` и `shouldStop()` в контекстах обеих подсистем
       ([ADR 0062](adr/0062-non-retryable-failure.md))
 - [ ] Запись попытки при захвате и закрытие по завершении; исход `LEASE_LOST` пишет переподхват,

@@ -4,6 +4,8 @@
 - **Статус:** принято
 - **Изменено:** [0083](0083-claim-limited-by-free-workers.md) — захват ограничен свободными воркерами, `batch-size` —
   верхняя граница; предупреждение `batch-size > workers` снято.
+- **Изменено:** [0103](0103-heartbeat-not-shorter-than-lease-fails.md) — `heartbeat-interval ≥ duration`
+  переходит из предупреждений в падение при старте, по каждому итоговому значению `duration`.
 
 ## Контекст
 
