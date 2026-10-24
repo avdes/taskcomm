@@ -43,50 +43,64 @@
 
 ## 1. Схема БД
 
-- [ ] DDL и Liquibase-changelog в ресурсах
-- [ ] `tc_execution` и денормализованная `execution_created_at` в четырёх подчинённых таблицах
-- [ ] Партиционирование по `execution_created_at`, управление партициями
+- [x] DDL и Liquibase-changelog в ресурсах
+- [x] `tc_execution` и денормализованная `execution_created_at` в четырёх подчинённых таблицах
+- [x] Партиционирование по `execution_created_at`, управление партициями
       ([ADR 0078](adr/0078-partition-maintenance.md)): один исполнитель за такт по
       `pg_try_advisory_xact_lock`; создание через `LIKE` и `ATTACH` с запасом; удаление одной
       транзакцией — `LOCK` девяти партиций с `SET LOCAL lock_timeout`, повторная проверка, `DROP`;
       очистка реестра корреляции после удаления пачками; настройки `taskcomm.schema.partitions.*`,
       первое создание при старте, режим `manage: false` и проверки при старте
       ([ADR 0080](adr/0080-partition-configuration.md))
-- [ ] Таблицы попыток `tc_task_attempt` и `tc_communication_attempt`, тоже партиционированные;
+- [x] Таблицы попыток `tc_task_attempt` и `tc_communication_attempt`, тоже партиционированные;
       `parent_attempt_id` у батчей и подзадач
-- [ ] `tc_task_result`, партиционированная наравне со всеми
+- [x] `tc_task_result`, партиционированная наравне со всеми
       ([ADR 0058](adr/0058-task-result-storage.md))
-- [ ] `tc_communication_dedup`, партиционированная наравне с коммуникациями, с тремя частичными
+- [x] `tc_communication_dedup`, партиционированная наравне с коммуникациями, с тремя частичными
       индексами ([ADR 0076](adr/0076-communication-deduplication.md))
-- [ ] Непартиционированные справочники `tc_communication_correlation` — с индексом
+- [x] Непартиционированные справочники `tc_communication_correlation` — с индексом
       `(execution_created_at)` для очистки — и `tc_searchable_field`
-- [ ] Справочник `tc_partition_horizon` из одной строки и ведение границы активных партиций
+- [x] Справочник `tc_partition_horizon` из одной строки и ведение границы активных партиций
       тактом обслуживания: первый расчёт при старте до поллеров, сдвиг вперёд под
       `pg_try_advisory_xact_lock` по диапазону, WARN при границе старше `drop.retention`
       ([ADR 0101](adr/0101-active-partition-horizon.md))
-- [ ] Колонки `priority` и `claim_order_at` в четырёх подчинённых таблицах
+- [x] Колонки `priority` и `claim_order_at` в четырёх подчинённых таблицах
       ([ADR 0063](adr/0063-claim-ordering-and-pollers.md))
-- [ ] `cancel_requested_at` во всех четырёх подчинённых таблицах
+- [x] `cancel_requested_at` во всех четырёх подчинённых таблицах
       ([ADR 0070](adr/0070-cancellation-on-any-entity.md))
-- [ ] Колонка `phase` (`PROCESS` | `EXPAND` | `COLLECT`) в `tc_task`, `tc_task_batch`
+- [x] Колонка `phase` (`PROCESS` | `EXPAND` | `COLLECT`) в `tc_task`, `tc_task_batch`
       и `tc_task_attempt` ([ADR 0069](adr/0069-parent-phase-column.md)); у задачи пуста до первого
       захвата
-- [ ] Указатель на создателя: `origin_type`, `origin_id`, `origin_attempt_id`, `origin_relation` —
+- [x] Указатель на создателя: `origin_type`, `origin_id`, `origin_attempt_id`, `origin_relation` —
       **только в `tc_task` и `tc_communication`** ([ADR 0064](adr/0064-entity-origin-links.md)).
       Ни таблицы связей, ни closure table. Комментарий обязан объяснять, что пустое значение —
       норма
-- [ ] `CHECK` по статусам: у `tc_task_batch` и `tc_task_unit` добавлены `AWAITING_PARENT`
+- [x] `CHECK` по статусам: у `tc_task_batch` и `tc_task_unit` добавлены `AWAITING_PARENT`
       и `ABANDONED` ([ADR 0068](adr/0068-expansion-children-statuses.md))
-- [ ] Индексы по сводному списку из [docs/rules/persistence.md](rules/persistence.md), включая
+- [x] Индексы по сводному списку из [docs/rules/persistence.md](rules/persistence.md), включая
       **три** частичных под формы захвата
       (без `AWAITING_PARENT` в условии) и частичный `(parent_attempt_id)` по `AWAITING_PARENT`
-- [ ] `taskcomm.schema.initialize` через `DataSourceScriptDatabaseInitializer`, по умолчанию `never`
-- [ ] Тестовая инфраструктура: Testcontainers с PostgreSQL, версия из BOM Spring Boot; `*IT`
+- [x] `taskcomm.schema.initialize` через `DataSourceScriptDatabaseInitializer`, по умолчанию `never`
+- [x] Тестовая инфраструктура: Testcontainers с PostgreSQL, версия из BOM Spring Boot; `*IT`
       только на ней ([ADR 0085](adr/0085-tests-on-real-postgres.md))
-- [ ] Проверка схемы при старте с внятным сообщением
+- [x] Проверка схемы при старте с внятным сообщением
+
+- [x] Попутно, без чего схема не работает: выбор `DataSource` и менеджера транзакций по
+      `@TaskcommDataSource` / `@TaskcommTransactionManager` ([ADR 0094](adr/0094-creation-always-in-transaction.md)),
+      собственный планировщик с точкой замены `@TaskcommScheduler`
+      ([ADR 0096](adr/0096-no-foreign-type-beans.md)), `TaskcommException` и
+      `TaskcommConfigurationException` в корневом пакете, код схемы в `schema.internal`
+      ([ADR 0107](adr/0107-schema-internal-package.md)), задача `integrationTest`
+      ([ADR 0108](adr/0108-integration-test-task.md)), схема одним файлом formatted SQL
+      ([ADR 0109](adr/0109-schema-as-formatted-sql.md))
 
 **Готово, когда** тест на PostgreSQL в Testcontainers поднимает схему с нуля, а проверка ловит
 расхождение ([ADR 0085](adr/0085-tests-on-real-postgres.md)).
+Проверено локально (JDK 25.0.4.1, Docker, PostgreSQL 17 в Testcontainers, Liquibase 5.0.3 из BOM):
+`clean build publishToMavenLocal` проходит целиком — 28 модульных и 26 интеграционных тестов.
+Схема поднимается с нуля скриптом `initialize` и Liquibase-changelog на Liquibase 5.0.3 и 4.33.0
+(последней под Apache 2.0, отдельным загрузчиком классов), все пути дают один каталог;
+проверка ловит нехватку таблицы, колонки и партиционирования.
 
 ## 2. Публичный API задач
 

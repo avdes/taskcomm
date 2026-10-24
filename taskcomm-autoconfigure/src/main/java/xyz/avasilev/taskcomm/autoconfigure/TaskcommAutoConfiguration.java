@@ -3,6 +3,7 @@ package xyz.avasilev.taskcomm.autoconfigure;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 
 /**
@@ -15,10 +16,16 @@ import org.springframework.context.annotation.Bean;
  * (docs/adr/0090-root-switch-disables-everything.md). Порядок
  * {@code @AutoConfiguration(after = ...)} включённость не передаёт — её передаёт только условие.
  *
+ * <p>{@code @EnableConfigurationProperties} без аргументов не регистрирует ни одного бина свойств,
+ * а только гарантирует связывание {@code @ConfigurationProperties} на {@code @Bean}-методе: без него
+ * свойства молча остались бы значениями по умолчанию в любом контексте, где связывание не включил
+ * кто-то другой.
+ *
  * @see TaskcommProperties
  */
 @AutoConfiguration
 @ConditionalOnProperty(prefix = "taskcomm", name = "enabled", havingValue = "true", matchIfMissing = true)
+@EnableConfigurationProperties
 public class TaskcommAutoConfiguration {
 
     /**

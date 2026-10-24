@@ -11,10 +11,14 @@ dependencies {
     testImplementation platform(libs.spring.boot.bom)
 
     compileOnly libs.spring.boot.autoconfigure
+    // JdbcClient, DataSourceScriptDatabaseInitializer и автоконфигурации DataSource, после которых
+    // встаёт наша. Потребителю это приезжает через spring-boot-starter-jdbc в стартере.
+    compileOnly libs.spring.boot.jdbc
     annotationProcessor libs.spring.boot.configuration.processor
     annotationProcessor libs.spring.boot.autoconfigure.processor
 
     compileOnly libs.jetbrains.annotations
+    compileOnly libs.slf4j.api
 
     compileOnly libs.lombok
     annotationProcessor libs.lombok
@@ -29,8 +33,51 @@ dependencies {
     testAnnotationProcessor libs.lombok
 
     testImplementation libs.spring.boot.starter.test
+    testImplementation libs.spring.boot.starter.jdbc
     testImplementation libs.archunit.junit5
+    testImplementation libs.testcontainers.postgresql
+    testImplementation libs.testcontainers.junit.jupiter
+    testImplementation libs.liquibase.core
+    testRuntimeOnly libs.postgresql
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+// Разделение тестов по имени класса (docs/adr/0108-integration-test-task.md): test — только *Test,
+// без Docker; integrationTest — только *IT на PostgreSQL в Testcontainers (docs/adr/0085), входит
+// в check. Набор исходников один — src/test.
+tasks.named('test', Test) {
+    include '**/*Test.class'
+}
+
+// Liquibase ветки 4 для теста совместимости changelog (docs/adr/0092). Отдельная конфигурация без BOM:
+// в общем classpath тестов Liquibase 5 из BOM, и две версии одного артефакта там не уживаются.
+// Тест грузит эти jar изолированным загрузчиком классов.
+configurations {
+    liquibase4 {
+        canBeConsumed = false
+        canBeResolved = true
+    }
+}
+
+dependencies {
+    liquibase4 libs.liquibase4.core
+    liquibase4 libs.liquibase4.picocli
+}
+
+def integrationTest = tasks.register('integrationTest', Test) {
+    group = 'verification'
+    description = 'Интеграционные тесты (*IT) на PostgreSQL в Testcontainers. Нужен Docker.'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    include '**/*IT.class'
+    shouldRunAfter tasks.named('test')
+    def liquibase4 = configurations.liquibase4
+    inputs.files(liquibase4).withPropertyName('liquibase4')
+    jvmArgumentProviders.add({ ["-Dtaskcomm.test.liquibase4.classpath=${liquibase4.asPath}"] } as CommandLineArgumentProvider)
+}
+
+tasks.named('check') {
+    dependsOn integrationTest
 }
 
 checkstyle {

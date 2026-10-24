@@ -5,7 +5,10 @@
 // в api попадает в опубликованные метаданные и у Gradle-потребителя поднимает все зависимости
 // из BOM до наших версий. Версии зависимостей стартера — явные, из каталога. Проверяет это
 // задача verifyNoExportedPlatform в корневом build.gradle.
+//
+// Драйвер PostgreSQL стартер не везёт: его версию и способ подключения выбирает потребитель.
 dependencies {
     api project(':taskcomm-autoconfigure')
     api libs.spring.boot.starter
+    api libs.spring.boot.starter.jdbc
 }

@@ -2,12 +2,14 @@ package xyz.avasilev.taskcomm.autoconfigure;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ThreadFactory;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
+import org.springframework.boot.sql.init.DatabaseInitializationMode;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.core.task.TaskDecorator;
 import org.springframework.scheduling.TaskScheduler;
@@ -31,6 +33,22 @@ class TaskcommAutoConfigurationTest {
             assertThat(context).hasSingleBean(TaskcommProperties.class);
             assertThat(context.getBean(TaskcommProperties.class).isEnabled()).isTrue();
         });
+    }
+
+    @Test
+    void bindsPropertiesWithoutHelpFromOtherAutoConfigurations() {
+        this.contextRunner
+                .withPropertyValues(
+                        "taskcomm.schema.initialize=always",
+                        "taskcomm.schema.partitions.period=week",
+                        "taskcomm.schema.partitions.drop.retention=30d")
+                .run(context -> {
+                    final TaskcommProperties.Schema schema =
+                            context.getBean(TaskcommProperties.class).getSchema();
+                    assertThat(schema.getInitialize()).isEqualTo(DatabaseInitializationMode.ALWAYS);
+                    assertThat(schema.getPartitions().getPeriod()).isEqualTo(PartitionPeriod.WEEK);
+                    assertThat(schema.getPartitions().getDrop().getRetention()).isEqualTo(Duration.ofDays(30));
+                });
     }
 
     @Test

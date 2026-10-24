@@ -142,7 +142,8 @@ taskcomm/
 Внутри `taskcomm-autoconfigure`:
 
 ```
-xyz.avasilev.taskcomm
+xyz.avasilev.taskcomm          TaskcommException и его общие наследники — публичный API,
+│                              доступный всем пакетам без связи между подсистемами
 ├── execution/
 │   ├── api/           публичный API: Execution, ExecutionRef, ExecutionService
 │   └── internal/      реализация, ExecutionRepository, держатель текущего дела
@@ -156,6 +157,9 @@ xyz.avasilev.taskcomm
 │   │                  CommunicationProcessor и его транспортные наследники, CommunicationContext,
 │   │                  нейтральные заголовки
 │   └── internal/      реализация, CommunicationRepository
+├── schema/
+│   └── internal/      проверка схемы при старте, initialize, обслуживание партиций и граница
+│                      активных партиций — общее для подсистем, без api (ADR 0107)
 ├── rest/              контроллеры и DTO (внутренняя реализация, не публичный Java API)
 └── autoconfigure/     классы @AutoConfiguration и @ConfigurationProperties
 ```
@@ -171,8 +175,15 @@ xyz.avasilev.taskcomm
 gradlew.bat build
 ```
 
-Полный прогон перед коммитом: компиляция, Spotless (проверка), Checkstyle, Error Prone, unit-тесты.
+Полный прогон перед коммитом: компиляция, Spotless (проверка), Checkstyle, Error Prone, unit-тесты
+и интеграционные тесты на Testcontainers — **нужен запущенный Docker**.
 Запускать **всегда** перед тем, как считать задачу выполненной.
+
+```powershell
+gradlew.bat test
+```
+
+Только unit-тесты, без Docker.
 
 ```powershell
 gradlew.bat test --tests "xyz.avasilev.taskcomm.task.internal.TaskServiceTest"
@@ -316,7 +327,8 @@ public sealed interface Communication<C> {
 - Логирование — `@Slf4j`, параметризованные сообщения (`log.debug("задача {} провалена", id)`),
   без конкатенации строк.
 - `Optional` — только как возвращаемое значение; не поле, не параметр метода.
-- Исключения наследуются от общего `TaskcommException`. Не глотать и не делать
+- Исключения наследуются от общего `TaskcommException` (корневой пакет); ошибки настроек и схемы
+  при старте — `TaskcommConfigurationException`. Не глотать и не делать
   «залогировал и пробросил» одновременно.
 - Javadoc обязателен для всех публичных типов и методов (то есть для всего вне `internal`).
 - **Комментарии, Javadoc и сообщения коммитов — на русском языке.**
@@ -349,7 +361,9 @@ public sealed interface Communication<C> {
 
 ## Тесты
 
-- `*Test` — unit-тесты, `*IT` — интеграционные.
+- `*Test` — unit-тесты, `*IT` — интеграционные. Разделение — по имени класса: задача `test`
+  запускает только `*Test`, задача `integrationTest` — только `*IT`, и она входит в `check`
+  ([ADR 0108](docs/adr/0108-integration-test-task.md)). Класс с другим именем не запустит ни одна.
 - **Интеграционные тесты — только на PostgreSQL в Testcontainers**
   ([ADR 0085](docs/adr/0085-tests-on-real-postgres.md)). H2 и другие встроенные базы не годятся:
   нет партиционирования с `ATTACH`, `jsonb`, `SKIP LOCKED` в семантике PostgreSQL, advisory-блокировок.
@@ -369,6 +383,8 @@ public sealed interface Communication<C> {
   - `api` не зависит от `internal`;
   - `task` и `communication` не зависят друг от друга;
   - `execution` не зависит ни от `task`, ни от `communication` — агрегат пассивен;
+  - `schema.internal` используется только из `schema` и `autoconfigure`, а `schema` не зависит
+    ни от `task`, ни от `communication`, ни от `execution` ([ADR 0107](docs/adr/0107-schema-internal-package.md));
   - `rest` зависит только от `api`;
   - в `internal` нет стереотипных аннотаций Spring.
 - Утверждения — AssertJ (`assertThat`), не `Assertions.assertEquals`.

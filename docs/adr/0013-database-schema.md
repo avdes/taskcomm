@@ -8,6 +8,8 @@
   на PostgreSQL не срабатывает никогда. Для тестов — `always`.
 - **Изменено:** [0092](0092-jackson-3-liquibase-compatibility.md) — зависимости на Liquibase нет
   вовсе, даже `optional`; changelog совместим с Liquibase 4.x и 5.x.
+- **Изменено:** [0109](0109-schema-as-formatted-sql.md) — changelog и голый DDL — один файл
+  Liquibase formatted SQL на версию; комментарии через `COMMENT ON`, а не `remarks`.
 
 ## Контекст
 

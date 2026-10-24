@@ -24,6 +24,9 @@ import org.springframework.stereotype.Service;
  *   <li>задачи и коммуникации не зависят друг от друга (docs/adr/0010-separate-engines.md);
  *   <li>{@code execution} не зависит ни от задач, ни от коммуникаций — агрегат пассивен
  *       (docs/adr/0038-execution-aggregate.md);
+ *   <li>{@code schema.internal} используется только из {@code schema} и {@code autoconfigure},
+ *       а {@code schema} не зависит ни от подсистем, ни от {@code execution}
+ *       (docs/adr/0107-schema-internal-package.md);
  *   <li>{@code rest} зависит только от {@code api};
  *   <li>во внутренней реализации нет стереотипных аннотаций Spring — сканирование в стартере
  *       запрещено.
@@ -44,6 +47,8 @@ class ArchitectureTest {
     static final String COMMUNICATION_INTERNAL = "xyz.avasilev.taskcomm.communication.internal..";
     static final String EXECUTION = "xyz.avasilev.taskcomm.execution..";
     static final String EXECUTION_INTERNAL = "xyz.avasilev.taskcomm.execution.internal..";
+    static final String SCHEMA = "xyz.avasilev.taskcomm.schema..";
+    static final String SCHEMA_INTERNAL = "xyz.avasilev.taskcomm.schema.internal..";
     static final String REST = "xyz.avasilev.taskcomm.rest..";
     static final String AUTOCONFIGURE = "xyz.avasilev.taskcomm.autoconfigure..";
 
@@ -109,6 +114,22 @@ class ArchitectureTest {
             .dependOnClassesThat()
             .resideInAnyPackage(TASK, COMMUNICATION)
             .allowEmptyShould(true);
+
+    @ArchTest
+    static final ArchRule SCHEMA_INTERNAL_USED_ONLY_BY_AUTOCONFIGURE = noClasses()
+            .that()
+            .resideOutsideOfPackages(SCHEMA, AUTOCONFIGURE)
+            .should()
+            .dependOnClassesThat()
+            .resideInAPackage(SCHEMA_INTERNAL);
+
+    @ArchTest
+    static final ArchRule SCHEMA_DOES_NOT_DEPEND_ON_SUBSYSTEMS = noClasses()
+            .that()
+            .resideInAPackage(SCHEMA)
+            .should()
+            .dependOnClassesThat()
+            .resideInAnyPackage(TASK, COMMUNICATION, EXECUTION);
 
     @ArchTest
     static final ArchRule REST_USES_ONLY_API = noClasses()

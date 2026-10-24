@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    Точка входа для потребителей на Liquibase:
+    <include file="db/changelog/taskcomm/master.xml" relativeToChangelogFile="false"/>
+
+    Файлы версий — Liquibase formatted SQL (docs/adr/0109-schema-as-formatted-sql.md), подключаются
+    по порядку. Схема XSD — 4.0, самая ранняя ветки 4: changelog обязан читаться любой версией
+    Liquibase 4 и Liquibase 5, а все они везут эту схему в своём jar
+    (docs/adr/0092-jackson-3-liquibase-compatibility.md). Кроме include, здесь ничего нет.
+-->
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                            http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.0.xsd">
+
+    <include file="db/changelog/taskcomm/taskcomm-2.0.0.sql" relativeToChangelogFile="false"/>
+
+</databaseChangeLog>
