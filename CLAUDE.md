@@ -233,6 +233,11 @@ gradlew.bat publishToMavenLocal
 - Порядок конфигураций задаётся через `@AutoConfiguration(after = ..., before = ...)`.
 - Зависимости в `taskcomm-autoconfigure` объявляются как `compileOnly` / `optional`;
   реальные транзитивы собираются в `taskcomm-spring-boot-starter` через `api`.
+- **Стартер не экспортирует BOM Spring Boot**, и вообще ни один модуль не публикует платформу
+  ([ADR 0106](docs/adr/0106-starter-does-not-export-bom.md)): у Gradle-потребителя она подняла бы
+  все зависимости из BOM до наших версий. Зависимости стартера — с явными версиями из каталога.
+  Задача `verifyNoExportedPlatform` в составе `check` читает опубликованные `.module` и `.pom`
+  и валит сборку, если платформа в них появилась.
 - Подключён `spring-boot-configuration-processor` — свойства автодополняются в IDE потребителя.
 
 ### Регистрация обработчиков

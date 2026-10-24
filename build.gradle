@@ -41,4 +41,45 @@ subprojects {
             }
         }
     }
+
+    // Опубликованные метаданные не должны тянуть потребителю ничью платформу
+    // (docs/adr/0106-starter-does-not-export-bom.md): BOM в Gradle Module Metadata поднимает
+    // все его зависимости у Gradle-потребителя, а импорт в dependencyManagement POM — признак
+    // того же. Проверка читает сгенерированные файлы, а не build.gradle: платформа может прийти
+    // и не из явной строки.
+    def verifyNoExportedPlatform = tasks.register('verifyNoExportedPlatform') {
+        group = 'verification'
+        description = 'Проверяет, что опубликованные .module и .pom не экспортируют платформу (BOM).'
+        def moduleTask = tasks.named('generateMetadataFileForMavenPublication')
+        def pomTask = tasks.named('generatePomFileForMavenPublication')
+        dependsOn moduleTask, pomTask
+        def moduleFile = moduleTask.flatMap { it.outputFile }
+        def pomFile = pomTask.map { it.destination }
+        inputs.file(moduleFile)
+        inputs.file(pomFile)
+        def projectPath = path
+        doLast {
+            def module = new groovy.json.JsonSlurper().parse(moduleFile.get().asFile)
+            def platforms = module.variants.collectMany { variant ->
+                (variant.dependencies ?: []).findAll { dependency ->
+                    def category = dependency.attributes?.get('org.gradle.category')
+                    category == 'platform' || category == 'enforced-platform'
+                }.collect { dependency -> "${dependency.group}:${dependency.module} (${variant.name})" }
+            }
+            if (!platforms.isEmpty()) {
+                throw new GradleException(
+                        "${projectPath}: опубликованные метаданные экспортируют платформу: ${platforms.join(', ')}. "
+                                + 'См. docs/adr/0106-starter-does-not-export-bom.md.')
+            }
+            if (pomFile.get().text.contains('<dependencyManagement>')) {
+                throw new GradleException(
+                        "${projectPath}: опубликованный POM содержит dependencyManagement. "
+                                + 'См. docs/adr/0106-starter-does-not-export-bom.md.')
+            }
+        }
+    }
+
+    tasks.named('check') {
+        dependsOn verifyNoExportedPlatform
+    }
 }

@@ -35,6 +35,11 @@
       Проверено локально (JDK 25.0.4.1 из `~/.jdks/ms-25.0.4.1`): `build publishToMavenLocal
       --rerun-tasks` проходит целиком. Сборка на JDK 21 с этого момента невозможна — запись
       о проверке на JDK 21 выше относится к прежней базовой линии.
+- [x] Стартер не экспортирует BOM Spring Boot ([ADR 0106](adr/0106-starter-does-not-export-bom.md)):
+      `api platform(...)` убран, задача `verifyNoExportedPlatform` в `check` у обоих модулей.
+      Проверено: с возвращённой платформой задача падает, без неё `build publishToMavenLocal
+      --rerun-tasks` проходит, в опубликованных `.module` и `.pom` стартера нет ни
+      `spring-boot-dependencies`, ни `dependencyManagement`
 
 ## 1. Схема БД
 
