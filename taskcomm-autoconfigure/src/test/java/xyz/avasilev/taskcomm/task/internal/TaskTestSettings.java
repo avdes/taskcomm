@@ -7,6 +7,9 @@ import java.util.Set;
 /** Настройки попыток и поллеров для интеграционных тестов подсистемы задач. */
 final class TaskTestSettings {
 
+    /** Результаты детей не удаляются. */
+    static final ResultDiscard KEEP_RESULTS = new ResultDiscard(ResultDiscard.Mode.NEVER, Duration.ZERO);
+
     private TaskTestSettings() {}
 
     /** Раскладка из одного основного поллера с шагом дедлайна в минуту. */

@@ -89,7 +89,8 @@ public class TaskcommTaskAutoConfiguration {
                 TaskPropertiesMapping.global(properties.getTask()),
                 TaskPropertiesMapping.types(properties.getTask()),
                 registry,
-                pollers);
+                pollers,
+                TaskPropertiesMapping.discard(properties.getResults()));
     }
 
     /**

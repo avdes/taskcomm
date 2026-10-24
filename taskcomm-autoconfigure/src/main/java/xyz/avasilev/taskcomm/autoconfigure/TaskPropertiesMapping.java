@@ -13,6 +13,7 @@ import xyz.avasilev.taskcomm.task.internal.LeaseSettings;
 import xyz.avasilev.taskcomm.task.internal.PartitionRange;
 import xyz.avasilev.taskcomm.task.internal.PollerLayout;
 import xyz.avasilev.taskcomm.task.internal.PollerSettings;
+import xyz.avasilev.taskcomm.task.internal.ResultDiscard;
 import xyz.avasilev.taskcomm.task.internal.RetryOverride;
 import xyz.avasilev.taskcomm.task.internal.RetryPolicy;
 import xyz.avasilev.taskcomm.task.internal.SettingsOverride;
@@ -103,6 +104,19 @@ final class TaskPropertiesMapping {
                 .map(entry -> dedicated(entry.getKey(), entry.getValue(), main))
                 .toList();
         return withPath("taskcomm.task.pollers", () -> new PollerLayout(mainPoller, dedicated));
+    }
+
+    /**
+     * Удаление результатов детей после сборки.
+     *
+     * @param results свойства {@code taskcomm.results}
+     * @return настройка во внутреннем виде
+     */
+    static ResultDiscard discard(final TaskcommProperties.Results results) {
+        return withPath(
+                "taskcomm.results",
+                () -> new ResultDiscard(
+                        ResultDiscard.Mode.valueOf(results.getDiscard().name()), results.getDiscardAfter()));
     }
 
     /**

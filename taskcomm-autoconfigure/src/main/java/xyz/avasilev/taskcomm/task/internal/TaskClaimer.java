@@ -15,9 +15,6 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
-import xyz.avasilev.taskcomm.execution.api.Origin;
-import xyz.avasilev.taskcomm.execution.api.OriginRelation;
-import xyz.avasilev.taskcomm.execution.api.OriginType;
 import xyz.avasilev.taskcomm.execution.internal.UuidV7;
 
 /**
@@ -54,6 +51,8 @@ public class TaskClaimer {
                     NULL::timestamptz AS claim_order_at, NULL::text AS payload, NULL::timestamptz AS created_at,
                     NULL::text AS origin_type, NULL::uuid AS origin_id, NULL::uuid AS origin_attempt_id,
                     NULL::text AS origin_relation,
+                    coalesce(b.task_id, u.task_id) AS parent_task_id, u.batch_id AS parent_batch_id,
+                    coalesce(b.parent_attempt_id, u.parent_attempt_id) AS parent_attempt_id,
                     a.id AS attempt_id, a.locked_by, a.lease_renewals
                FROM tc_task_attempt a
                LEFT JOIN tc_task t ON a.level = 'TASK' AND t.execution_created_at >= :activeFrom
@@ -89,11 +88,15 @@ public class TaskClaimer {
             "NULL::text AS origin_type, NULL::uuid AS origin_id, NULL::uuid AS origin_attempt_id, "
                     + "NULL::text AS origin_relation";
 
-    private static final String CLOSE_EXPIRED = """
-            UPDATE tc_task_attempt
-               SET status = 'LEASE_LOST', status_description = :reason, finished_at = now(), updated_at = now()
-             WHERE execution_created_at = :executionCreatedAt AND id = :attemptId AND finished_at IS NULL
-            """;
+    /** Родство детей раскрытия (docs/adr/0047-children-belong-to-attempt.md); у задачи его нет. */
+    private static final String NO_PARENT =
+            "NULL::uuid AS parent_task_id, NULL::uuid AS parent_batch_id, NULL::uuid AS parent_attempt_id";
+
+    private static final String BATCH_PARENT =
+            "e.task_id AS parent_task_id, NULL::uuid AS parent_batch_id, e.parent_attempt_id";
+
+    private static final String UNIT_PARENT =
+            "e.task_id AS parent_task_id, e.batch_id AS parent_batch_id, e.parent_attempt_id";
 
     private static final String MARK_RUNNING = """
             UPDATE {table}
@@ -139,11 +142,11 @@ public class TaskClaimer {
 
     private final AttemptSettingsSource settings;
 
-    private final TaskRetries retries;
-
     private final DoubleSupplier random;
 
     private final String instance;
+
+    private final TaskLeaseExpiry expiry;
 
     /**
      * Собирает захват.
@@ -170,9 +173,9 @@ public class TaskClaimer {
         this.transactions.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
         this.ids = ids;
         this.settings = settings;
-        this.retries = new TaskRetries(settings, pollers, random);
         this.random = random;
         this.instance = instance;
+        this.expiry = new TaskLeaseExpiry(dataSource, transactionManager, settings, pollers, random);
     }
 
     /**
@@ -187,14 +190,15 @@ public class TaskClaimer {
      */
     List<ClaimedAttempt> claim(final PollerSettings poller, final Map<String, ContractShape> types, final int limit) {
         final Ordering ordering = this.ordering(poller);
-        final List<ClaimedAttempt> claimed = this.transactions.execute(status -> {
+        final Tick tick = this.transactions.execute(status -> {
             TaskSql.forceCustomPlan(this.jdbc);
             final List<Row> rows = this.readBranches(ordering, types, limit, poller.batchSize());
-            rows.stream()
+            final List<ExpiredAttempt> closed = rows.stream()
                     .filter(Expired.class::isInstance)
-                    .map(Expired.class::cast)
-                    .forEach(this::closeExpired);
-            return rows.stream()
+                    .map(row -> ((Expired) row).attempt())
+                    .filter(expired -> this.expiry.close(this.jdbc, expired))
+                    .toList();
+            final List<ClaimedAttempt> claimed = rows.stream()
                     .filter(Candidate.class::isInstance)
                     .map(Candidate.class::cast)
                     .filter(candidate ->
@@ -203,8 +207,13 @@ public class TaskClaimer {
                     .limit(limit)
                     .map(candidate -> this.start(candidate, types.get(candidate.taskType())))
                     .toList();
+            return new Tick(claimed, closed);
         });
-        return claimed == null ? List.of() : claimed;
+        if (tick == null) {
+            return List.of();
+        }
+        tick.closed().forEach(this.expiry::cascade);
+        return tick.claimed();
     }
 
     private List<Row> readBranches(
@@ -245,28 +254,6 @@ public class TaskClaimer {
             case PRIORITY -> Ordering.PRIORITY;
             case QUOTA -> this.random.getAsDouble() < poller.fifoShare() ? Ordering.FIFO : Ordering.PRIORITY;
         };
-    }
-
-    private void closeExpired(final Expired expired) {
-        final LeaseSettings lease = this.settings
-                .settings(expired.taskType(), expired.entity().level(), expired.phase())
-                .lease();
-        final String reason = expired.leaseRenewals() >= lease.maxRenewals()
-                ? "превышен предел обработки " + lease.maxExecutionTime()
-                : "аренда истекла: экземпляр " + expired.lockedBy() + " не продлил её";
-        final int closed = this.jdbc
-                .sql(CLOSE_EXPIRED)
-                .param("reason", reason)
-                .param("executionCreatedAt", TaskSql.parameter(expired.entity().executionCreatedAt()))
-                .param("attemptId", expired.attemptId())
-                .update();
-        if (closed == 1) {
-            this.retries.afterUnsuccessful(
-                    this.jdbc,
-                    new TaskRetries.Target(expired.entity(), expired.taskType(), expired.phase()),
-                    true,
-                    null);
-        }
     }
 
     private ClaimedAttempt start(final Candidate candidate, final ContractShape shape) {
@@ -328,7 +315,7 @@ public class TaskClaimer {
         return """
                 %6$s AS (SELECT '%1$s' AS level, e.execution_created_at, e.id AS target_id, e.execution_id,
                         e.task_type, %2$s AS phase, %3$s AS contract_shape, e.priority, e.next_attempt_at,
-                        e.claim_order_at, e.payload::text AS payload, e.created_at, %7$s,
+                        e.claim_order_at, e.payload::text AS payload, e.created_at, %7$s, %8$s,
                         NULL::uuid AS attempt_id, NULL::text AS locked_by, NULL::integer AS lease_renewals
                    FROM %4$s e
                   WHERE e.status = 'PENDING'
@@ -350,7 +337,8 @@ public class TaskClaimer {
                         level.table(),
                         ordering.orderBy,
                         level.name().toLowerCase(Locale.ROOT) + "_candidates",
-                        level == TaskLevel.TASK ? TASK_ORIGIN : NO_ORIGIN);
+                        level == TaskLevel.TASK ? TASK_ORIGIN : NO_ORIGIN,
+                        parent(level));
     }
 
     private static Row row(final ResultSet rs, final int rowNum) throws SQLException {
@@ -362,13 +350,14 @@ public class TaskClaimer {
         final TaskPhase taskPhase = phase == null ? null : TaskPhase.valueOf(phase);
         final UUID attemptId = rs.getObject("attempt_id", UUID.class);
         if (attemptId != null) {
-            return new Expired(
+            return new Expired(new ExpiredAttempt(
                     entity,
                     rs.getString("task_type"),
                     taskPhase,
                     attemptId,
                     rs.getString("locked_by"),
-                    rs.getInt("lease_renewals"));
+                    rs.getInt("lease_renewals"),
+                    ClaimRows.parent(rs)));
         }
         final String shape = rs.getString("contract_shape");
         return new Candidate(
@@ -384,21 +373,17 @@ public class TaskClaimer {
                         rs.getObject("execution_id", UUID.class),
                         rs.getInt("priority"),
                         rs.getObject("created_at", OffsetDateTime.class).toInstant(),
-                        origin(rs),
+                        ClaimRows.origin(rs),
+                        ClaimRows.parent(rs),
                         rs.getString("payload")));
     }
 
-    private static Origin origin(final ResultSet rs) throws SQLException {
-        final String type = rs.getString("origin_type");
-        if (type == null) {
-            return null;
-        }
-        final String relation = rs.getString("origin_relation");
-        return new Origin(
-                OriginType.valueOf(type),
-                rs.getObject("origin_id", UUID.class),
-                rs.getObject("origin_attempt_id", UUID.class),
-                OriginRelation.valueOf(relation));
+    private static String parent(final TaskLevel level) {
+        return switch (level) {
+            case TASK -> NO_PARENT;
+            case BATCH -> BATCH_PARENT;
+            case UNIT -> UNIT_PARENT;
+        };
     }
 
     /** Порядок, в котором выбирается готовая работа в этом такте. */
@@ -457,14 +442,15 @@ public class TaskClaimer {
     /**
      * Брошенная попытка второй ветки — открытая, с истёкшей арендой.
      *
-     * @param entity ключ строки сущности попытки
-     * @param taskType тип задачи
-     * @param phase фаза попытки
-     * @param attemptId идентификатор попытки
-     * @param lockedBy экземпляр, не продливший аренду
-     * @param leaseRenewals сколько раз аренда продлевалась
+     * @param attempt брошенная попытка
      */
-    private record Expired(
-            TaskEntityRef entity, String taskType, TaskPhase phase, UUID attemptId, String lockedBy, int leaseRenewals)
-            implements Row {}
+    private record Expired(ExpiredAttempt attempt) implements Row {}
+
+    /**
+     * Итог такта: захваченная работа и закрытые им брошенные попытки.
+     *
+     * @param claimed захваченная работа
+     * @param closed брошенные попытки, закрытые этим тактом
+     */
+    private record Tick(List<ClaimedAttempt> claimed, List<ExpiredAttempt> closed) {}
 }

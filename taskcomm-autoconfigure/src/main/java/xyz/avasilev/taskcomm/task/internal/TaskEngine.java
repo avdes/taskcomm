@@ -24,7 +24,7 @@ import xyz.avasilev.taskcomm.execution.internal.UuidV7;
  * Движок задач экземпляра: поллеры со своими пулами воркеров и поток heartbeat
  * (docs/adr/0063-claim-ordering-and-pollers.md, docs/adr/0025-lease-mechanics.md).
  *
- * <p>Такты поллеров и heartbeat идут на планировщике стартера — помеченном
+ * <p>Такты поллеров, heartbeat и подметальщика результатов детей идут на планировщике стартера — помеченном
  * {@code @TaskcommScheduler} или собственном, который движок заводит и останавливает сам; бином
  * он не регистрируется (docs/adr/0096-no-foreign-type-beans.md). Пулы воркеров — по одному
  * на поллер, их создаёт только стартер; потоки — из фабрики под {@code @TaskcommWorkerThreadFactory}
@@ -46,6 +46,8 @@ public class TaskEngine implements SmartLifecycle {
     private final List<TaskPoller> pollers;
 
     private final TaskHeartbeat heartbeat;
+
+    private final TaskResultDiscard discard;
 
     private final Duration heartbeatTick;
 
@@ -90,17 +92,22 @@ public class TaskEngine implements SmartLifecycle {
                 layout,
                 () -> ThreadLocalRandom.current().nextDouble(),
                 instance);
+        final TaskChildren children = new TaskChildren(dataSource, transactionManager, layout);
+        this.discard = new TaskResultDiscard(dataSource, transactionManager, settings.discard());
         final TaskAttemptCloser closer = new TaskAttemptCloser(
                 dataSource,
                 transactionManager,
                 ids,
                 settings,
                 layout,
-                () -> ThreadLocalRandom.current().nextDouble());
+                () -> ThreadLocalRandom.current().nextDouble(),
+                children,
+                this.discard);
         this.heartbeat = new TaskHeartbeat(dataSource, transactionManager);
         this.heartbeatTick = settings.heartbeatTick();
         this.externalScheduler = scheduler;
-        final TaskWorker worker = new TaskWorker(registry, codec, closer, this.heartbeat);
+        final TaskWorker worker = new TaskWorker(
+                registry, codec, closer, this.heartbeat, children, new TaskCollector(dataSource, codec), ids);
         final List<PollerSettings> all = new ArrayList<>();
         all.add(layout.main());
         all.addAll(layout.dedicated());
@@ -127,6 +134,12 @@ public class TaskEngine implements SmartLifecycle {
         }
         this.futures.add(scheduler.scheduleWithFixedDelay(
                 this::renewLeases, Instant.now().plus(this.heartbeatTick), this.heartbeatTick));
+        if (this.discard.enabled()) {
+            this.futures.add(scheduler.scheduleWithFixedDelay(
+                    this::sweepResults,
+                    Instant.now().plus(TaskResultDiscard.SWEEP_INTERVAL),
+                    TaskResultDiscard.SWEEP_INTERVAL));
+        }
         this.running = true;
     }
 
@@ -167,6 +180,14 @@ public class TaskEngine implements SmartLifecycle {
         }
     }
 
+    private void sweepResults() {
+        try {
+            this.discard.sweep();
+        } catch (final RuntimeException failure) {
+            log.warn("Удаление результатов детей не удалось, повтор на следующем такте", failure);
+        }
+    }
+
     private ThreadPoolTaskScheduler createOwn() {
         final ThreadPoolTaskScheduler own = new ThreadPoolTaskScheduler();
         own.setPoolSize(2);
@@ -177,17 +198,12 @@ public class TaskEngine implements SmartLifecycle {
         return own;
     }
 
-    /**
-     * Типы, которые поллер вправе захватывать. Задачи с подзадачами и группами не захватываются,
-     * пока не подключены раскрытие и сборка: без процессора фаз они остаются в {@code PENDING}.
-     */
+    /** Типы, которые поллер вправе захватывать, с формами контрактов их процессоров. */
     private static Map<String, ContractShape> claimable(
             final PollerLayout layout, final PollerSettings poller, final TaskProcessorRegistry registry) {
         final Map<String, ContractShape> shapes = registry.shapes();
         final Map<String, ContractShape> result = new LinkedHashMap<>();
-        layout.claimableTypes(poller, shapes.keySet()).stream()
-                .filter(type -> shapes.get(type) == ContractShape.FLAT)
-                .forEach(type -> result.put(type, shapes.get(type)));
+        layout.claimableTypes(poller, shapes.keySet()).forEach(type -> result.put(type, shapes.get(type)));
         return result;
     }
 

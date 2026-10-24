@@ -26,6 +26,9 @@ class TaskRetries {
     /** Причина {@code FAILED} у сущности, исчерпавшей лимит. */
     static final String EXHAUSTED = "попытки исчерпаны";
 
+    /** Начало причины {@code FAILED} у сущности, чья сборка неуспешна (docs/adr/0069-parent-phase-column.md). */
+    static final String COLLECT_FAILED = "сборка неуспешна: ";
+
     /**
      * Место имени таблицы уровня в тексте запроса. Подставляется имя из {@link TaskLevel}, а не
      * ввод: запрос по одной из трёх таблиц сущностей пишется один раз.
@@ -74,14 +77,14 @@ class TaskRetries {
      */
     void afterUnsuccessful(final JdbcClient jdbc, final Target target, final boolean retryable, final String reason) {
         if (!retryable) {
-            this.fail(jdbc, target.entity(), reason);
+            this.fail(jdbc, target, reason);
         } else {
             final RetryPolicy policy = this.settings
                     .settings(target.taskType(), target.entity().level(), target.phase())
                     .retry();
             final int attempts = this.countAttempts(jdbc, target);
             if (policy.exhausted(attempts)) {
-                this.fail(jdbc, target.entity(), EXHAUSTED);
+                this.fail(jdbc, target, EXHAUSTED);
             } else {
                 this.requeue(jdbc, target, policy.delay(attempts, this.random));
             }
@@ -109,9 +112,14 @@ class TaskRetries {
                 .update();
     }
 
-    private void fail(final JdbcClient jdbc, final TaskEntityRef entity, final String reason) {
+    /**
+     * Неуспешная сборка делает родителя терминальным и при полностью успешных детях — причина
+     * обязана это называть.
+     */
+    private void fail(final JdbcClient jdbc, final Target target, final String reason) {
+        final TaskEntityRef entity = target.entity();
         jdbc.sql(FAIL.replace(TABLE, entity.level().table()))
-                .param("reason", reason)
+                .param("reason", target.phase() == TaskPhase.COLLECT ? COLLECT_FAILED + reason : reason)
                 .param("executionCreatedAt", TaskSql.parameter(entity.executionCreatedAt()))
                 .param("targetId", entity.id())
                 .update();

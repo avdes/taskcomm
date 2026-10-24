@@ -68,7 +68,8 @@ class TaskPartitionRevivalIT {
                 TaskTestSettings.settings(3, Duration.ZERO, Duration.ofMinutes(1)),
                 Map.of(),
                 registry,
-                TaskTestSettings.layout());
+                TaskTestSettings.layout(),
+                TaskTestSettings.KEEP_RESULTS);
         final DefaultTaskService service = new DefaultTaskService(
                 () -> registry,
                 () -> settings,

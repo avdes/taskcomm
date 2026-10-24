@@ -68,6 +68,8 @@ CREATE INDEX IF NOT EXISTS tc_task_claim_priority_idx ON tc_task (status, priori
 CREATE INDEX IF NOT EXISTS tc_task_claim_fifo_idx ON tc_task (status, next_attempt_at)
     WHERE status IN ('PENDING', 'RUNNING', 'AWAITING_CHILDREN');
 CREATE INDEX IF NOT EXISTS tc_task_execution_idx ON tc_task (execution_id);
+CREATE INDEX IF NOT EXISTS tc_task_results_discard_idx ON tc_task (updated_at)
+    WHERE child_results_discarded_at IS NULL AND phase = 'COLLECT' AND status IN ('SUCCEEDED', 'WARNING', 'SKIPPED');
 
 COMMENT ON TABLE tc_task IS 'Задача: работа над множеством бизнес-объектов потребителя. Корень иерархии задача, группы, подзадачи. Повтор идёт на той же строке, история захватов лежит в tc_task_attempt';
 COMMENT ON COLUMN tc_task.id IS 'Идентификатор задачи, UUIDv7';
@@ -129,7 +131,10 @@ CREATE INDEX IF NOT EXISTS tc_task_batch_claim_fifo_idx ON tc_task_batch (status
 CREATE INDEX IF NOT EXISTS tc_task_batch_awaiting_parent_idx ON tc_task_batch (parent_attempt_id)
     WHERE status = 'AWAITING_PARENT';
 CREATE INDEX IF NOT EXISTS tc_task_batch_parent_attempt_idx ON tc_task_batch (parent_attempt_id, status);
+CREATE INDEX IF NOT EXISTS tc_task_batch_collect_idx ON tc_task_batch (parent_attempt_id, id);
 CREATE INDEX IF NOT EXISTS tc_task_batch_execution_idx ON tc_task_batch (execution_id);
+CREATE INDEX IF NOT EXISTS tc_task_batch_results_discard_idx ON tc_task_batch (updated_at)
+    WHERE child_results_discarded_at IS NULL AND phase = 'COLLECT' AND status IN ('SUCCEEDED', 'WARNING', 'SKIPPED');
 
 COMMENT ON TABLE tc_task_batch IS 'Группа подзадач внутри задачи. Рождается только в раскрытии задачи и принадлежит породившей её попытке раскрытия, а не задаче';
 COMMENT ON COLUMN tc_task_batch.id IS 'Идентификатор группы, UUIDv7';
@@ -185,6 +190,7 @@ CREATE INDEX IF NOT EXISTS tc_task_unit_claim_fifo_idx ON tc_task_unit (status, 
 CREATE INDEX IF NOT EXISTS tc_task_unit_awaiting_parent_idx ON tc_task_unit (parent_attempt_id)
     WHERE status = 'AWAITING_PARENT';
 CREATE INDEX IF NOT EXISTS tc_task_unit_parent_attempt_idx ON tc_task_unit (parent_attempt_id, status);
+CREATE INDEX IF NOT EXISTS tc_task_unit_collect_idx ON tc_task_unit (parent_attempt_id, id);
 CREATE INDEX IF NOT EXISTS tc_task_unit_execution_idx ON tc_task_unit (execution_id);
 
 COMMENT ON TABLE tc_task_unit IS 'Подзадача: обработка одного бизнес-объекта. Минимальная единица работы и повтора. Самодостаточна: её повтор не требует ни группы, ни задачи';

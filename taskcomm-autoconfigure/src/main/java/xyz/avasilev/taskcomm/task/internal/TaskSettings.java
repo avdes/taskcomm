@@ -7,7 +7,8 @@ import java.util.Map;
  * Итоговые настройки подсистемы задач после разрешения по пяти уровням
  * (docs/adr/0061-processor-configuration-annotations.md): настройки попыток по типу и методу
  * процессора (docs/adr/0118-attempt-settings-per-processor-method.md) и приоритет по умолчанию
- * по типу (docs/adr/0084-priority-only-per-type.md). Собирается при старте один раз; все проверки
+ * по типу (docs/adr/0084-priority-only-per-type.md), раскладка поллеров и удаление результатов детей
+ * после сборки (docs/adr/0122-child-results-discard-sweep.md). Собирается при старте один раз; все проверки
  * и печать итоговых значений — при сборке.
  */
 public final class TaskSettings implements AttemptSettingsSource {
@@ -25,13 +26,17 @@ public final class TaskSettings implements AttemptSettingsSource {
 
     private final PollerLayout pollers;
 
+    private final ResultDiscard discard;
+
     TaskSettings(
             final AttemptSettings global,
             final Map<Key, AttemptSettings> attempts,
             final Map<String, Integer> priorities,
             final Duration heartbeatTick,
-            final PollerLayout pollers) {
+            final PollerLayout pollers,
+            final ResultDiscard discard) {
         this.pollers = pollers;
+        this.discard = discard;
         this.global = global;
         this.attempts = Map.copyOf(attempts);
         this.priorities = Map.copyOf(priorities);
@@ -45,6 +50,7 @@ public final class TaskSettings implements AttemptSettingsSource {
      * @param yaml переопределения типов из {@code yaml} — уровни 1 и 2
      * @param registry процессоры — их аннотации дают уровни 3 и 4
      * @param pollers раскладка поллеров — такт поллера типа для предупреждения о короткой аренде
+     * @param discard удаление результатов детей после сборки
      * @return итоговые настройки
      * @throws xyz.avasilev.taskcomm.TaskcommConfigurationException если итоговое значение недопустимо
      */
@@ -52,8 +58,9 @@ public final class TaskSettings implements AttemptSettingsSource {
             final AttemptSettings global,
             final Map<String, TypeOverrides> yaml,
             final TaskProcessorRegistry registry,
-            final PollerLayout pollers) {
-        return new TaskSettingsResolver(global, yaml, pollers).resolve(registry);
+            final PollerLayout pollers,
+            final ResultDiscard discard) {
+        return new TaskSettingsResolver(global, yaml, pollers).resolve(registry, discard);
     }
 
     /**
@@ -96,6 +103,15 @@ public final class TaskSettings implements AttemptSettingsSource {
      */
     PollerLayout pollers() {
         return this.pollers;
+    }
+
+    /**
+     * Когда удалять результаты детей после сборки.
+     *
+     * @return настройка удаления
+     */
+    ResultDiscard discard() {
+        return this.discard;
     }
 
     /**

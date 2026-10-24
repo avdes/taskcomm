@@ -136,13 +136,27 @@ final class TaskTestDatabase {
     }
 
     TaskAttemptCloser closer(final AttemptSettings settings) {
+        return this.closer(settings, TaskTestSettings.KEEP_RESULTS);
+    }
+
+    TaskAttemptCloser closer(final AttemptSettings settings, final ResultDiscard discard) {
         return new TaskAttemptCloser(
                 this.dataSource,
                 this.transactionManager,
                 this.ids,
                 AttemptSettingsSource.uniform(settings),
                 TaskTestSettings.layout(),
-                () -> 0.5);
+                () -> 0.5,
+                this.children(),
+                this.discard(discard));
+    }
+
+    TaskChildren children() {
+        return new TaskChildren(this.dataSource, this.transactionManager, TaskTestSettings.layout());
+    }
+
+    TaskResultDiscard discard(final ResultDiscard discard) {
+        return new TaskResultDiscard(this.dataSource, this.transactionManager, discard);
     }
 
     /**

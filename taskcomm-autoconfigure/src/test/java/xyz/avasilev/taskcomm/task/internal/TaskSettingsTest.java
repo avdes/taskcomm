@@ -244,7 +244,8 @@ class TaskSettingsTest {
     }
 
     private static TaskSettings resolve(final Map<String, TypeOverrides> yaml, final TaskProcessor<?>... processors) {
-        return TaskSettings.resolve(GLOBAL, yaml, new TaskProcessorRegistry(List.of(processors)), LAYOUT);
+        return TaskSettings.resolve(
+                GLOBAL, yaml, new TaskProcessorRegistry(List.of(processors)), LAYOUT, TaskTestSettings.KEEP_RESULTS);
     }
 
     private static int maxAttempts(final TaskSettings settings, final String type, final ProcessorMethod method) {

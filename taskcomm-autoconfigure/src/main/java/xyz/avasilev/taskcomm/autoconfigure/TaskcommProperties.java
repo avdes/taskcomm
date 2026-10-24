@@ -35,6 +35,28 @@ public class TaskcommProperties {
     /** Подсистема задач. */
     private Task task = new Task();
 
+    /** Удаление результатов детей задач после сборки. */
+    private Results results = new Results();
+
+    /**
+     * Свойства {@code taskcomm.results.*}: когда удаляются результаты детей после успешной сборки
+     * (docs/adr/0058-task-result-storage.md, docs/adr/0122-child-results-discard-sweep.md).
+     */
+    @Getter
+    @Setter
+    public static class Results {
+
+        /**
+         * Когда удалять результаты детей после успешной сборки: never — не удалять, они живут
+         * до дропа партиции; immediately — сразу после сборки; after — через discard-after.
+         * Удаляются результаты детей всех попыток раскрытия родителя, факт отмечается на родителе.
+         */
+        private ResultsDiscard discard = ResultsDiscard.AFTER;
+
+        /** Через сколько после успешной сборки удалять результаты детей в режиме after. */
+        private Duration discardAfter = Duration.ofDays(7);
+    }
+
     /**
      * Свойства {@code taskcomm.task.*} (docs/adr/0060-retry-and-lease-configuration.md). Числа —
      * отправная точка, а не выверенная рекомендация.

@@ -187,9 +187,35 @@ class TaskcommTaskAutoConfigurationIT {
     void runsPollersAndHeartbeatOnSchedulerMarkedWithQualifier() {
         this.contextRunner.withUserConfiguration(QualifiedScheduler.class).run(context -> {
             assertThat(context).hasNotFailed();
-            // такт партиций, такт основного поллера и heartbeat
-            assertThat(context.getBean(CountingScheduler.class).scheduled.get()).isEqualTo(3);
+            // такт партиций, такт основного поллера, heartbeat и подметальщик результатов детей
+            assertThat(context.getBean(CountingScheduler.class).scheduled.get()).isEqualTo(4);
         });
+    }
+
+    @Test
+    void schedulesNoResultSweepWhenResultsAreKept() {
+        this.contextRunner
+                .withUserConfiguration(QualifiedScheduler.class)
+                .withPropertyValues("taskcomm.results.discard=never")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context.getBean(CountingScheduler.class)
+                                    .scheduled
+                                    .get())
+                            .isEqualTo(3);
+                });
+    }
+
+    @Test
+    void failsOnNegativeResultDiscardDelay() {
+        this.contextRunner
+                .withPropertyValues("taskcomm.results.discard-after=-1s")
+                .run(context -> assertThat(context)
+                        .getFailure()
+                        .hasStackTraceContaining("taskcomm.results: ")
+                        .rootCause()
+                        .isInstanceOf(TaskcommConfigurationException.class)
+                        .hasMessageContaining("отрицательным"));
     }
 
     @Test
