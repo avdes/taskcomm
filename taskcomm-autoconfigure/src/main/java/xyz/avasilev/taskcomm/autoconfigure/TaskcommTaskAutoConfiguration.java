@@ -27,6 +27,7 @@ import xyz.avasilev.taskcomm.task.internal.TaskEngine;
 import xyz.avasilev.taskcomm.task.internal.TaskPayloadCodec;
 import xyz.avasilev.taskcomm.task.internal.TaskProcessorRegistry;
 import xyz.avasilev.taskcomm.task.internal.TaskSettings;
+import xyz.avasilev.taskcomm.task.internal.TaskStartup;
 
 /**
  * Подсистема задач: реестр процессоров, итоговые настройки, {@link TaskService} и движок —
@@ -90,7 +91,8 @@ public class TaskcommTaskAutoConfiguration {
                 TaskPropertiesMapping.types(properties.getTask()),
                 registry,
                 pollers,
-                TaskPropertiesMapping.discard(properties.getResults()));
+                TaskPropertiesMapping.discard(properties.getResults()),
+                TaskPropertiesMapping.safety(properties.getTask().getSafety()));
     }
 
     /**
@@ -152,6 +154,8 @@ public class TaskcommTaskAutoConfiguration {
      * @param qualified {@code DataSource} под {@link TaskcommDataSource}
      * @param dataSources все бины {@code DataSource}
      * @param beanFactory фабрика бинов
+     * @param qualifiedManagers менеджеры транзакций под {@link TaskcommTransactionManager}
+     * @param managers все менеджеры транзакций
      * @return сервис задач
      */
     @Bean
@@ -162,13 +166,51 @@ public class TaskcommTaskAutoConfiguration {
             final TaskPayloadCodec codec,
             @TaskcommDataSource final ObjectProvider<DataSource> qualified,
             final ObjectProvider<DataSource> dataSources,
-            final ListableBeanFactory beanFactory) {
+            final ListableBeanFactory beanFactory,
+            @TaskcommTransactionManager final ObjectProvider<PlatformTransactionManager> qualifiedManagers,
+            final ObjectProvider<PlatformTransactionManager> managers) {
+        final DataSource dataSource = TaskcommBeanSelection.dataSource(qualified, dataSources, beanFactory);
         return new DefaultTaskService(
                 registry::getObject,
                 settings::getObject,
                 creator,
                 codec,
-                TaskcommBeanSelection.dataSource(qualified, dataSources, beanFactory));
+                dataSource,
+                TaskcommBeanSelection.transactionManager(qualifiedManagers, managers, beanFactory, dataSource));
+    }
+
+    /**
+     * Подготовка задач при старте — после проверки схемы: синхронизация белого списка полей поиска
+     * и предупреждение об осиротевших задачах.
+     *
+     * @param properties свойства стартера
+     * @param qualified {@code DataSource} под {@link TaskcommDataSource}
+     * @param dataSources все бины {@code DataSource}
+     * @param qualifiedManagers менеджеры транзакций под {@link TaskcommTransactionManager}
+     * @param managers все менеджеры транзакций
+     * @param beanFactory фабрика бинов
+     * @param ids генератор идентификаторов
+     * @param registry реестр процессоров
+     * @return подготовка
+     */
+    @Bean
+    @DependsOn("taskcommSchemaStartup")
+    public TaskStartup taskcommTaskStartup(
+            final TaskcommProperties properties,
+            @TaskcommDataSource final ObjectProvider<DataSource> qualified,
+            final ObjectProvider<DataSource> dataSources,
+            @TaskcommTransactionManager final ObjectProvider<PlatformTransactionManager> qualifiedManagers,
+            final ObjectProvider<PlatformTransactionManager> managers,
+            final ListableBeanFactory beanFactory,
+            final UuidV7 ids,
+            final TaskProcessorRegistry registry) {
+        final DataSource dataSource = TaskcommBeanSelection.dataSource(qualified, dataSources, beanFactory);
+        return new TaskStartup(
+                dataSource,
+                TaskcommBeanSelection.transactionManager(qualifiedManagers, managers, beanFactory, dataSource),
+                ids,
+                registry,
+                properties.getSearch().isRemoveUndeclaredFields());
     }
 
     /**
@@ -189,7 +231,7 @@ public class TaskcommTaskAutoConfiguration {
      * @return движок
      */
     @Bean
-    @DependsOn("taskcommSchemaStartup")
+    @DependsOn({"taskcommSchemaStartup", "taskcommTaskStartup"})
     public TaskEngine taskcommTaskEngine(
             @TaskcommDataSource final ObjectProvider<DataSource> qualified,
             final ObjectProvider<DataSource> dataSources,

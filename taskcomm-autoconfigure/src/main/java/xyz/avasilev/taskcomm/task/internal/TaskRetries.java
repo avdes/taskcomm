@@ -1,6 +1,7 @@
 package xyz.avasilev.taskcomm.task.internal;
 
 import java.time.Duration;
+import java.util.Optional;
 import java.util.function.DoubleSupplier;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -9,7 +10,8 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * Что делается с сущностью после неуспешной попытки — закрытой воркером исходом {@code FAILED}
  * или переподхватом исходом {@code LEASE_LOST}: для политики повторов это одно и то же
  * (docs/adr/0067-expired-lease-closes-attempt.md). Сущность возвращается в {@code PENDING}
- * с backoff или, если лимит исчерпан, становится {@code FAILED}.
+ * с backoff или, если лимит исчерпан, становится {@code FAILED}. Неуспех после отмены — своей или
+ * предка — не повторяется: сущность становится {@code CANCELLED} (docs/adr/0100-cancel-keeps-real-outcome.md).
  *
  * <p>Лимит — свой у каждой фазы (docs/adr/0116-attempt-limit-per-phase.md): попытки считаются
  * по строкам попыток той же фазы начиная с {@code retry_cycle_started_at} сущности
@@ -55,9 +57,9 @@ class TaskRetries {
              WHERE execution_created_at = :executionCreatedAt AND id = :targetId AND status = 'RUNNING'
             """;
 
-    private static final String FAIL = """
+    private static final String FINISH = """
             UPDATE {table}
-               SET status = 'FAILED', status_description = :reason, updated_at = now()
+               SET status = :status, status_description = :reason, updated_at = now()
              WHERE execution_created_at = :executionCreatedAt AND id = :targetId AND status = 'RUNNING'
             """;
 
@@ -76,7 +78,10 @@ class TaskRetries {
      * @param reason причина {@code FAILED}, если повтор запрещён
      */
     void afterUnsuccessful(final JdbcClient jdbc, final Target target, final boolean retryable, final String reason) {
-        if (!retryable) {
+        final Optional<TaskEntityRef> cancelledBy = TaskCancelFlags.cancelledBy(jdbc, target.entity());
+        if (cancelledBy.isPresent()) {
+            this.finish(jdbc, target.entity(), "CANCELLED", TaskCancelFlags.reason(target.entity(), cancelledBy.get()));
+        } else if (!retryable) {
             this.fail(jdbc, target, reason);
         } else {
             final RetryPolicy policy = this.settings
@@ -117,9 +122,17 @@ class TaskRetries {
      * обязана это называть.
      */
     private void fail(final JdbcClient jdbc, final Target target, final String reason) {
-        final TaskEntityRef entity = target.entity();
-        jdbc.sql(FAIL.replace(TABLE, entity.level().table()))
-                .param("reason", target.phase() == TaskPhase.COLLECT ? COLLECT_FAILED + reason : reason)
+        this.finish(
+                jdbc,
+                target.entity(),
+                "FAILED",
+                target.phase() == TaskPhase.COLLECT ? COLLECT_FAILED + reason : reason);
+    }
+
+    private void finish(final JdbcClient jdbc, final TaskEntityRef entity, final String status, final String reason) {
+        jdbc.sql(FINISH.replace(TABLE, entity.level().table()))
+                .param("status", status)
+                .param("reason", reason)
                 .param("executionCreatedAt", TaskSql.parameter(entity.executionCreatedAt()))
                 .param("targetId", entity.id())
                 .update();

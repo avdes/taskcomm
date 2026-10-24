@@ -10,6 +10,9 @@ final class TaskTestSettings {
     /** Результаты детей не удаляются. */
     static final ResultDiscard KEEP_RESULTS = new ResultDiscard(ResultDiscard.Mode.NEVER, Duration.ZERO);
 
+    /** Подстраховка с тактом и выдержкой в минуту. */
+    static final SafetySettings SAFETY = new SafetySettings(Duration.ofMinutes(1), Duration.ofMinutes(1));
+
     private TaskTestSettings() {}
 
     /** Раскладка из одного основного поллера с шагом дедлайна в минуту. */

@@ -238,7 +238,7 @@ class TaskClaimIT {
     }
 
     @Test
-    void taskStartedUnderAnotherShapeIsNotClaimed() {
+    void taskStartedUnderAnotherShapeIsCancelledInsteadOfClaimed() {
         final CreatedTask task = this.db.submit("order-sync", 100);
         this.db
                 .jdbc
@@ -251,7 +251,12 @@ class TaskClaimIT {
                         .claimer("worker-a", settings, () -> 0.5)
                         .claim(DEADLINE, Map.of("order-sync", ContractShape.UNIT), 1))
                 .isEmpty();
-        assertThat(this.db.status(TaskLevel.TASK, task.id())).isEqualTo("PENDING");
+        assertThat(this.db.status(TaskLevel.TASK, task.id())).isEqualTo("CANCELLED");
+        assertThat(this.db.count(
+                        "SELECT count(*) FROM tc_task WHERE id = :id AND cancel_requested_at IS NOT NULL"
+                                + " AND status_description = 'форма контракта FLAT не совпадает с текущей UNIT'",
+                        task.id()))
+                .isEqualTo(1);
     }
 
     @Test

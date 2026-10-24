@@ -31,6 +31,7 @@ taskcomm:
             lease: { max-execution-time: 2h }
     pollers:                        # дополнительные к основному; не заданное берётся у основного
       urgent: { types: [order-urgent], workers: 4, claim-order: priority }
+    safety: { interval: 1m, grace: 1m }   # подстраховочный поллер
   communication:
     enabled: true
     poll: { interval: 1s, batch-size: 100, workers: 8,
@@ -95,6 +96,9 @@ taskcomm:
   в памяти: держало аренду от свободных экземпляров, тратило предел обработки и портило
   `started_at`. Захват вернул сколько просили — следующий сразу при освобождении воркера; меньше —
   по такту `poll.interval`. Такт — пауза для пустой очереди, а не потолок пропускной способности.
+- **`taskcomm.task.safety`** — такт подстраховочного поллера и выдержка, после которой
+  не двигавшийся шаг каскада считается брошенным ([ADR 0126](../adr/0126-safety-poller.md));
+  оба больше нуля, иначе падение при старте.
 - **`taskcomm.results`** — когда удаляются результаты детей после успешной сборки или пропуска
   в сборке: `never`, `immediately`, `after` через `discard-after`; умолчание — `after`, `7d`
   ([ADR 0122](../adr/0122-child-results-discard-sweep.md)). Отрицательный срок — падение при

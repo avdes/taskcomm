@@ -97,8 +97,10 @@ class TaskWorker {
     private Call prepare(final ClaimedAttempt attempt, final RegisteredProcessor processor) {
         final ExecutionRef execution = new ExecutionRef(
                 attempt.entity().executionId(), attempt.target().executionCreatedAt());
-        final TaskProcessingContext context =
-                new TaskProcessingContext(execution, attempt.history(), () -> this.heartbeat.isLost(attempt));
+        final TaskProcessingContext context = new TaskProcessingContext(
+                execution,
+                attempt.history(),
+                () -> this.heartbeat.isLost(attempt) || this.heartbeat.isCancelled(attempt));
         final TaskLevel childLevel = childLevel(attempt.target().level(), processor.shape());
         final TaskEmitter emitter = attempt.phase() == TaskPhase.EXPAND
                 ? new TaskEmitter(attempt, childLevel, this.children, this.codec, this.ids)

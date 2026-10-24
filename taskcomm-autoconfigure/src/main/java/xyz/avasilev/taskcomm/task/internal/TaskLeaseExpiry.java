@@ -83,7 +83,7 @@ class TaskLeaseExpiry {
     void cascade(final ExpiredAttempt expired) {
         try {
             if (expired.phase() == TaskPhase.EXPAND) {
-                this.children.settle(expired.entity(), expired.attemptId(), false);
+                this.children.abandon(expired.entity(), expired.attemptId());
             }
             if (expired.parent() != null) {
                 this.children.parentReady(expired.entity(), expired.parent(), expired.taskType());

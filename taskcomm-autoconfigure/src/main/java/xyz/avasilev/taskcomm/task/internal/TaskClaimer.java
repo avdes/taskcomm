@@ -3,17 +3,16 @@ package xyz.avasilev.taskcomm.task.internal;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
-import java.time.OffsetDateTime;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.DoubleSupplier;
 import javax.sql.DataSource;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 import xyz.avasilev.taskcomm.execution.internal.UuidV7;
 
@@ -75,9 +74,9 @@ public class TaskClaimer {
      */
     private static final String BRANCHES = """
 
-            SELECT * FROM task_candidates
-            UNION ALL SELECT * FROM batch_candidates
-            UNION ALL SELECT * FROM unit_candidates
+            SELECT * FROM tc_task_candidates
+            UNION ALL SELECT * FROM tc_task_batch_candidates
+            UNION ALL SELECT * FROM tc_task_unit_candidates
             UNION ALL SELECT * FROM expired
             """;
 
@@ -98,55 +97,15 @@ public class TaskClaimer {
     private static final String UNIT_PARENT =
             "e.task_id AS parent_task_id, e.batch_id AS parent_batch_id, e.parent_attempt_id";
 
-    private static final String MARK_RUNNING = """
-            UPDATE {table}
-               SET status = 'RUNNING', updated_at = now()
-             WHERE execution_created_at = :executionCreatedAt AND id = :targetId
-            """;
-
-    /** Первый захват задачи: форма контракта и фаза пишутся вместе (docs/adr/0026-contract-shape-marking.md). */
-    private static final String MARK_TASK_RUNNING_FIRST_TIME = """
-            UPDATE tc_task
-               SET status = 'RUNNING', contract_shape = :contractShape, phase = :phase, updated_at = now()
-             WHERE execution_created_at = :executionCreatedAt AND id = :targetId
-            """;
-
-    private static final String INSERT_ATTEMPT = """
-            INSERT INTO tc_task_attempt (
-                id, created_at, updated_at, execution_created_at, level, target_id, phase,
-                locked_by, locked_until, lease_token, lease_renewals, started_at)
-            VALUES (:id, now(), now(), :executionCreatedAt, :level, :targetId, :phase,
-                    :lockedBy, now() + make_interval(secs => :lease), :leaseToken, 0, now())
-            """;
-
-    /**
-     * Попытки той же фазы: в текущем цикле повторов и за всю историю, считая только что
-     * вставленную.
-     */
-    private static final String ATTEMPT_HISTORY = """
-            SELECT count(*) FILTER (WHERE a.started_at >= e.retry_cycle_started_at) AS in_cycle,
-                   count(*) AS in_history
-              FROM tc_task_attempt a
-              JOIN {table} e ON e.execution_created_at = a.execution_created_at AND e.id = a.target_id
-             WHERE a.execution_created_at = :executionCreatedAt
-               AND a.level = :level
-               AND a.target_id = :targetId
-               AND a.phase = :phase
-            """;
-
     private final JdbcClient jdbc;
 
     private final TransactionTemplate transactions;
 
-    private final UuidV7 ids;
-
-    private final AttemptSettingsSource settings;
-
     private final DoubleSupplier random;
 
-    private final String instance;
+    private final TaskAttemptOpener opener;
 
-    private final TaskLeaseExpiry expiry;
+    private final TaskClaimGuard guard;
 
     /**
      * Собирает захват.
@@ -168,14 +127,10 @@ public class TaskClaimer {
             final DoubleSupplier random,
             final String instance) {
         this.jdbc = JdbcClient.create(dataSource);
-        this.transactions = new TransactionTemplate(transactionManager);
-        this.transactions.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
-        this.transactions.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
-        this.ids = ids;
-        this.settings = settings;
+        this.transactions = TaskSql.transactions(transactionManager);
         this.random = random;
-        this.instance = instance;
-        this.expiry = new TaskLeaseExpiry(dataSource, transactionManager, settings, pollers, random);
+        this.opener = new TaskAttemptOpener(ids, settings, instance);
+        this.guard = new TaskClaimGuard(dataSource, transactionManager, settings, pollers, random);
     }
 
     /**
@@ -184,41 +139,62 @@ public class TaskClaimer {
      *
      * @param poller поллер, от имени которого идёт захват
      * @param types типы, которые поллер вправе захватывать, с формой контракта их процессоров;
-     *     задача, начатая по другой форме, не захватывается
+     *     задача, начатая по другой форме, отменяется (docs/adr/0026-contract-shape-marking.md)
      * @param limit сколько захватить, не больше свободных воркеров
      * @return захваченная работа, в порядке формы захвата
      */
     List<ClaimedAttempt> claim(final PollerSettings poller, final Map<String, ContractShape> types, final int limit) {
         final Ordering ordering = this.ordering(poller);
-        final Tick tick = this.transactions.execute(status -> {
-            TaskSql.forceCustomPlan(this.jdbc);
-            final List<Row> rows = this.readBranches(ordering, types, limit, poller.batchSize());
-            final List<ExpiredAttempt> closed = rows.stream()
-                    .filter(Expired.class::isInstance)
-                    .map(row -> ((Expired) row).attempt())
-                    .filter(expired -> this.expiry.close(this.jdbc, expired))
-                    .toList();
-            final List<ClaimedAttempt> claimed = rows.stream()
-                    .filter(Candidate.class::isInstance)
-                    .map(Candidate.class::cast)
-                    .filter(candidate ->
-                            candidate.shape() == null || candidate.shape().equals(types.get(candidate.taskType())))
-                    .sorted(Comparator.comparing(Candidate::key, ordering.comparator()))
-                    .limit(limit)
-                    .map(candidate -> this.start(candidate, types.get(candidate.taskType())))
-                    .toList();
-            return new Tick(claimed, closed);
-        });
+        final Tick tick = this.transactions.execute(status -> this.tick(ordering, types, limit, poller.batchSize()));
         if (tick == null) {
             return List.of();
         }
-        tick.closed().forEach(this.expiry::cascade);
+        tick.afterCommit().run();
         return tick.claimed();
     }
 
-    private List<Row> readBranches(
+    /** Тело транзакции такта: брошенные попытки, проверка кандидатов, открытие попыток. */
+    private Tick tick(
             final Ordering ordering, final Map<String, ContractShape> types, final int limit, final int expiredLimit) {
+        TaskSql.forceCustomPlan(this.jdbc);
         final Instant activeFrom = TaskPartitionHorizon.activeFrom(this.jdbc);
+        final List<Row> rows = this.readBranches(activeFrom, ordering, types, limit, expiredLimit);
+        final List<Candidate> candidates = rows.stream()
+                .filter(Candidate.class::isInstance)
+                .map(Candidate.class::cast)
+                .toList();
+        final Set<TaskEntityRef> stopped = new HashSet<>();
+        final Runnable afterCommit = this.guard.check(
+                this.jdbc,
+                activeFrom,
+                rows.stream()
+                        .filter(Expired.class::isInstance)
+                        .map(row -> ((Expired) row).attempt())
+                        .toList(),
+                candidates.stream()
+                        .map(candidate -> new TaskClaimGuard.ClaimCandidate(
+                                candidate.entity(),
+                                candidate.taskType(),
+                                candidate.shape(),
+                                candidate.snapshot().parent()))
+                        .toList(),
+                types,
+                stopped);
+        final List<ClaimedAttempt> claimed = candidates.stream()
+                .filter(candidate -> !stopped.contains(candidate.entity()))
+                .sorted(ordering.candidates())
+                .limit(limit)
+                .map(candidate -> this.start(candidate, types.get(candidate.taskType())))
+                .toList();
+        return new Tick(claimed, afterCommit);
+    }
+
+    private List<Row> readBranches(
+            final Instant activeFrom,
+            final Ordering ordering,
+            final Map<String, ContractShape> types,
+            final int limit,
+            final int expiredLimit) {
         return this.jdbc
                 .sql(branchesQuery(ordering))
                 .param("activeFrom", TaskSql.parameter(activeFrom))
@@ -257,57 +233,10 @@ public class TaskClaimer {
     }
 
     private ClaimedAttempt start(final Candidate candidate, final ContractShape shape) {
-        final TaskEntityRef entity = candidate.entity();
         final TaskPhase phase = candidate.phase() == null ? shape.firstPhase() : candidate.phase();
-        final boolean firstClaim = entity.level() == TaskLevel.TASK && candidate.shape() == null;
-        this.jdbc
-                .sql(
-                        firstClaim
-                                ? MARK_TASK_RUNNING_FIRST_TIME
-                                : MARK_RUNNING.replace(
-                                        TaskRetries.TABLE, entity.level().table()))
-                .param("executionCreatedAt", TaskSql.parameter(entity.executionCreatedAt()))
-                .param("targetId", entity.id())
-                .param("contractShape", shape.name())
-                .param("phase", phase.name())
-                .update();
-        final LeaseSettings settings = this.settings
-                .settings(candidate.taskType(), entity.level(), phase)
-                .lease();
-        final AttemptLease lease = new AttemptLease(
-                this.ids.next(),
-                UUID.randomUUID(),
-                settings.duration(),
-                settings.heartbeatInterval(),
-                settings.maxRenewals());
-        this.jdbc
-                .sql(INSERT_ATTEMPT)
-                .param("id", lease.attemptId())
-                .param("executionCreatedAt", TaskSql.parameter(entity.executionCreatedAt()))
-                .param("level", entity.level().name())
-                .param("targetId", entity.id())
-                .param("phase", phase.name())
-                .param("lockedBy", this.instance)
-                .param("lease", TaskSql.seconds(lease.duration()))
-                .param("leaseToken", lease.token())
-                .update();
-        return new ClaimedAttempt(
-                lease, entity, candidate.taskType(), phase, this.history(entity, phase), candidate.snapshot());
-    }
-
-    /**
-     * Номер только что вставленной попытки и признак повтора — из строк попыток той же фазы
-     * (docs/adr/0112-attempt-number-in-processing-context.md).
-     */
-    private AttemptHistory history(final TaskEntityRef entity, final TaskPhase phase) {
-        return this.jdbc
-                .sql(ATTEMPT_HISTORY.replace(TaskRetries.TABLE, entity.level().table()))
-                .param("executionCreatedAt", TaskSql.parameter(entity.executionCreatedAt()))
-                .param("level", entity.level().name())
-                .param("targetId", entity.id())
-                .param("phase", phase.name())
-                .query((rs, rowNum) -> new AttemptHistory(rs.getInt("in_cycle"), rs.getInt("in_history") > 1))
-                .single();
+        final boolean firstClaim = candidate.entity().level() == TaskLevel.TASK && candidate.shape() == null;
+        return this.opener.open(
+                this.jdbc, candidate.entity(), candidate.taskType(), phase, firstClaim, shape, candidate.snapshot());
     }
 
     private static String candidates(
@@ -336,7 +265,7 @@ public class TaskClaimer {
                         contractShape,
                         level.table(),
                         ordering.orderBy,
-                        level.name().toLowerCase(Locale.ROOT) + "_candidates",
+                        level.table() + "_candidates",
                         level == TaskLevel.TASK ? TASK_ORIGIN : NO_ORIGIN,
                         parent(level));
     }
@@ -345,7 +274,7 @@ public class TaskClaimer {
         final TaskEntityRef entity = new TaskEntityRef(
                 TaskLevel.valueOf(rs.getString("level")),
                 rs.getObject("target_id", UUID.class),
-                rs.getObject("execution_created_at", OffsetDateTime.class).toInstant());
+                ClaimRows.instant(rs, "execution_created_at"));
         final String phase = rs.getString("phase");
         final TaskPhase taskPhase = phase == null ? null : TaskPhase.valueOf(phase);
         final UUID attemptId = rs.getObject("attempt_id", UUID.class);
@@ -367,12 +296,12 @@ public class TaskClaimer {
                 shape == null ? null : ContractShape.valueOf(shape),
                 new OrderKey(
                         rs.getInt("priority"),
-                        rs.getObject("next_attempt_at", OffsetDateTime.class).toInstant(),
-                        rs.getObject("claim_order_at", OffsetDateTime.class).toInstant()),
+                        ClaimRows.instant(rs, "next_attempt_at"),
+                        ClaimRows.instant(rs, "claim_order_at")),
                 new ClaimedEntity(
                         rs.getObject("execution_id", UUID.class),
                         rs.getInt("priority"),
-                        rs.getObject("created_at", OffsetDateTime.class).toInstant(),
+                        ClaimRows.instant(rs, "created_at"),
                         ClaimRows.origin(rs),
                         ClaimRows.parent(rs),
                         rs.getString("payload")));
@@ -396,6 +325,11 @@ public class TaskClaimer {
 
         Ordering(final String orderBy) {
             this.orderBy = orderBy;
+        }
+
+        /** Порядок кандидатов такта — по их ключам. */
+        private Comparator<Candidate> candidates() {
+            return Comparator.comparing(Candidate::key, this.comparator());
         }
 
         /** Тот же порядок для слияния кандидатов трёх уровней. */
@@ -450,7 +384,7 @@ public class TaskClaimer {
      * Итог такта: захваченная работа и закрытые им брошенные попытки.
      *
      * @param claimed захваченная работа
-     * @param closed брошенные попытки, закрытые этим тактом
+     * @param afterCommit каскад после коммита: брошенные попытки и закрытые кандидаты
      */
-    private record Tick(List<ClaimedAttempt> claimed, List<ExpiredAttempt> closed) {}
+    private record Tick(List<ClaimedAttempt> claimed, Runnable afterCommit) {}
 }

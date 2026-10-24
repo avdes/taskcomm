@@ -8,9 +8,9 @@ import xyz.avasilev.taskcomm.task.api.ProcessingContext;
  * Контекст одного вызова процессора. Все методы отвечают из памяти, без запроса к базе
  * (docs/adr/0112-attempt-number-in-processing-context.md, docs/adr/0062-non-retryable-failure.md).
  *
- * <p>{@link #shouldStop()} поднимают потеря аренды — её приносит поток heartbeat — и собственный
- * {@link #skip(String)} процессора. Отмену добавит механизм отмены
- * (docs/adr/0070-cancellation-on-any-entity.md).
+ * <p>{@link #shouldStop()} поднимают потеря аренды и отмена сущности или её предка — обе приносит
+ * поток heartbeat (docs/adr/0070-cancellation-on-any-entity.md), — и собственный
+ * {@link #skip(String)} процессора.
  *
  * <p>Живёт один вызов; поля {@code volatile}, потому что потребитель вправе спросить
  * {@link #shouldStop()} из потока, который сам завёл внутри вызова.
@@ -21,16 +21,17 @@ final class TaskProcessingContext implements ProcessingContext {
 
     private final AttemptHistory history;
 
-    private final BooleanSupplier leaseLost;
+    private final BooleanSupplier stopSignal;
 
     private volatile String skipReason;
 
     private volatile String doNotRetryReason;
 
-    TaskProcessingContext(final ExecutionRef execution, final AttemptHistory history, final BooleanSupplier leaseLost) {
+    TaskProcessingContext(
+            final ExecutionRef execution, final AttemptHistory history, final BooleanSupplier stopSignal) {
         this.execution = execution;
         this.history = history;
-        this.leaseLost = leaseLost;
+        this.stopSignal = stopSignal;
     }
 
     @Override
@@ -45,7 +46,7 @@ final class TaskProcessingContext implements ProcessingContext {
 
     @Override
     public boolean shouldStop() {
-        return this.skipReason != null || this.leaseLost.getAsBoolean();
+        return this.skipReason != null || this.stopSignal.getAsBoolean();
     }
 
     @Override

@@ -16,6 +16,7 @@ import xyz.avasilev.taskcomm.task.internal.PollerSettings;
 import xyz.avasilev.taskcomm.task.internal.ResultDiscard;
 import xyz.avasilev.taskcomm.task.internal.RetryOverride;
 import xyz.avasilev.taskcomm.task.internal.RetryPolicy;
+import xyz.avasilev.taskcomm.task.internal.SafetySettings;
 import xyz.avasilev.taskcomm.task.internal.SettingsOverride;
 import xyz.avasilev.taskcomm.task.internal.TypeOverrides;
 
@@ -104,6 +105,16 @@ final class TaskPropertiesMapping {
                 .map(entry -> dedicated(entry.getKey(), entry.getValue(), main))
                 .toList();
         return withPath("taskcomm.task.pollers", () -> new PollerLayout(mainPoller, dedicated));
+    }
+
+    /**
+     * Подстраховочный поллер.
+     *
+     * @param safety свойства {@code taskcomm.task.safety}
+     * @return настройки во внутреннем виде
+     */
+    static SafetySettings safety(final TaskcommProperties.Safety safety) {
+        return withPath("taskcomm.task.safety", () -> new SafetySettings(safety.getInterval(), safety.getGrace()));
     }
 
     /**

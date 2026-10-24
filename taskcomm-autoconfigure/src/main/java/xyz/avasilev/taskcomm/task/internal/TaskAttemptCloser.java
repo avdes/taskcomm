@@ -1,5 +1,6 @@
 package xyz.avasilev.taskcomm.task.internal;
 
+import java.util.Optional;
 import java.util.UUID;
 import java.util.function.DoubleSupplier;
 import javax.sql.DataSource;
@@ -151,6 +152,10 @@ class TaskAttemptCloser {
      * сразу идёт в захват сборки: сборка запускается и при нуле детей. После коммита дети
      * переводятся в {@code PENDING}.
      *
+     * <p>У отменённой сущности — своей отменой или предка — сборка не запускается: сущность
+     * становится {@code CANCELLED}, её дети после коммита — сразу {@code SKIPPED}
+     * (docs/adr/0100-cancel-keeps-real-outcome.md).
+     *
      * @param attempt захваченная работа
      * @param childCount сколько детей записано
      * @return {@code true}, если попытка была ещё открыта и закрыта этим вызовом
@@ -158,11 +163,12 @@ class TaskAttemptCloser {
      */
     boolean expanded(final ClaimedAttempt attempt, final int childCount) {
         requirePhase(attempt, TaskPhase.EXPAND);
-        return this.close(
-                attempt,
-                AttemptStatus.SUCCEEDED,
-                null,
-                () -> this.jdbc
+        return this.close(attempt, AttemptStatus.SUCCEEDED, null, () -> {
+            final Optional<TaskEntityRef> cancelledBy = TaskCancelFlags.cancelledBy(this.jdbc, attempt.target());
+            if (cancelledBy.isPresent()) {
+                this.finish(attempt, "CANCELLED", TaskCancelFlags.reason(attempt.target(), cancelledBy.get()));
+            } else {
+                this.jdbc
                         .sql(EXPANDED.replace(
                                 TaskRetries.TABLE, attempt.target().level().table()))
                         .param("children", childCount)
@@ -171,7 +177,9 @@ class TaskAttemptCloser {
                                 "executionCreatedAt",
                                 TaskSql.parameter(attempt.target().executionCreatedAt()))
                         .param("targetId", attempt.target().id())
-                        .update());
+                        .update();
+            }
+        });
     }
 
     /**
@@ -321,7 +329,7 @@ class TaskAttemptCloser {
     private void cascade(final ClaimedAttempt attempt, final AttemptStatus status) {
         try {
             if (attempt.phase() == TaskPhase.EXPAND) {
-                this.children.settle(attempt.target(), attempt.lease().attemptId(), status == AttemptStatus.SUCCEEDED);
+                this.settleChildren(attempt, status == AttemptStatus.SUCCEEDED);
             }
             if (attempt.phase() == TaskPhase.COLLECT && status != AttemptStatus.FAILED) {
                 this.discard.afterCollect(attempt.target());
@@ -338,6 +346,27 @@ class TaskAttemptCloser {
                     attempt.target().id(),
                     attempt.taskType(),
                     failure);
+        }
+    }
+
+    /**
+     * Дети закрытой попытки раскрытия: неуспех — {@code ABANDONED}; успех — {@code PENDING}, а у
+     * отменённой сущности — {@code SKIPPED}, и сущности, если она ещё ждёт детей, больше ждать
+     * нечего. Отмену читает заново: она могла прийти и после коммита закрытия.
+     */
+    private void settleChildren(final ClaimedAttempt attempt, final boolean succeeded) {
+        final TaskEntityRef target = attempt.target();
+        final UUID attemptId = attempt.lease().attemptId();
+        if (succeeded) {
+            final Optional<TaskEntityRef> cancelledBy = TaskCancelFlags.cancelledBy(this.jdbc, target);
+            if (cancelledBy.isPresent()) {
+                this.children.skip(target, attemptId, TaskCancelFlags.ancestor(cancelledBy.get()));
+                this.children.finishIfDone(target, attempt.taskType());
+            } else {
+                this.children.release(target, attemptId);
+            }
+        } else {
+            this.children.abandon(target, attemptId);
         }
     }
 

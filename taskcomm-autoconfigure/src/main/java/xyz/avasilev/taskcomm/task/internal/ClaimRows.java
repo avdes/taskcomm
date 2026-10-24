@@ -2,15 +2,29 @@ package xyz.avasilev.taskcomm.task.internal;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.UUID;
 import xyz.avasilev.taskcomm.execution.api.Origin;
 import xyz.avasilev.taskcomm.execution.api.OriginRelation;
 import xyz.avasilev.taskcomm.execution.api.OriginType;
 
-/** Разбор колонок связей в строке запроса захвата: указатель на создателя и родство ребёнка. */
+/** Разбор колонок строки запроса захвата: моменты, указатель на создателя и родство ребёнка. */
 final class ClaimRows {
 
     private ClaimRows() {}
+
+    /**
+     * Момент из колонки {@code timestamptz}: драйвер отдаёт {@link OffsetDateTime}.
+     *
+     * @param rs строка запроса
+     * @param column колонка
+     * @return момент
+     * @throws SQLException если колонку не прочитать
+     */
+    static Instant instant(final ResultSet rs, final String column) throws SQLException {
+        return rs.getObject(column, OffsetDateTime.class).toInstant();
+    }
 
     /**
      * Указатель на создателя (docs/adr/0064-entity-origin-links.md).

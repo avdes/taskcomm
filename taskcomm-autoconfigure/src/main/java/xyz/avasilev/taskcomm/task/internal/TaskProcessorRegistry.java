@@ -30,12 +30,14 @@ public final class TaskProcessorRegistry {
 
     private final Map<Class<?>, RegisteredProcessor> byClass;
 
+    private final List<SearchFieldDeclaration> searchFields;
+
     /**
      * Строит реестр.
      *
      * @param processors все процессоры задач приложения
-     * @throws TaskcommConfigurationException если тип назван двумя процессорами или параметр типа
-     *     процессора не выводится из класса
+     * @throws TaskcommConfigurationException если тип назван двумя процессорами, параметр типа
+     *     процессора не выводится из класса или поле поиска объявлено неверной формы
      */
     public TaskProcessorRegistry(final Collection<? extends TaskProcessor<?>> processors) {
         final Map<String, RegisteredProcessor> types = new LinkedHashMap<>();
@@ -52,6 +54,9 @@ public final class TaskProcessorRegistry {
         }
         this.byType = Map.copyOf(types);
         this.byClass = Map.copyOf(classes);
+        this.searchFields = types.values().stream()
+                .flatMap(registered -> SearchFieldDeclaration.of(registered.processor()).stream())
+                .toList();
         warnAboutDeprecated(types.values());
     }
 
@@ -112,6 +117,16 @@ public final class TaskProcessorRegistry {
     Map<String, ContractShape> shapes() {
         return this.byType.values().stream()
                 .collect(Collectors.toUnmodifiableMap(RegisteredProcessor::taskType, RegisteredProcessor::shape));
+    }
+
+    /**
+     * Поля поиска, объявленные процессорами, — для синхронизации в {@code tc_searchable_field}
+     * при старте (docs/adr/0037-search-field-registry.md).
+     *
+     * @return объявления
+     */
+    List<SearchFieldDeclaration> searchFields() {
+        return this.searchFields;
     }
 
     /**

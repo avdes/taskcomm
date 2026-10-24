@@ -69,13 +69,15 @@ class TaskPartitionRevivalIT {
                 Map.of(),
                 registry,
                 TaskTestSettings.layout(),
-                TaskTestSettings.KEEP_RESULTS);
+                TaskTestSettings.KEEP_RESULTS,
+                TaskTestSettings.SAFETY);
         final DefaultTaskService service = new DefaultTaskService(
                 () -> registry,
                 () -> settings,
                 this.db.creator(),
                 new TaskPayloadCodec(JsonMapper.builder().build()),
-                this.db.dataSource);
+                this.db.dataSource,
+                this.db.transactionManager);
 
         final Task<String> task;
         try (CurrentExecution.Scope _ = CurrentExecution.bind(new CurrentExecution.Binding(execution, creator))) {

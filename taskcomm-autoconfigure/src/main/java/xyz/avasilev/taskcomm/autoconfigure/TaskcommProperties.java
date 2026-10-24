@@ -38,6 +38,25 @@ public class TaskcommProperties {
     /** Удаление результатов детей задач после сборки. */
     private Results results = new Results();
 
+    /** Белый список полей поиска по нагрузке. */
+    private Search search = new Search();
+
+    /**
+     * Свойства {@code taskcomm.search.*} (docs/adr/0037-search-field-registry.md).
+     */
+    @Getter
+    @Setter
+    public static class Search {
+
+        /**
+         * Удалять при старте строки белого списка полей поиска, которых не объявляет ни один
+         * процессор. Поиск по удалённому полю перестаёт находить старые нагрузки; сами нагрузки
+         * не трогаются. Выключено по умолчанию: удаление не должно происходить оттого, что
+         * обновили версию зависимости.
+         */
+        private boolean removeUndeclaredFields;
+    }
+
     /**
      * Свойства {@code taskcomm.results.*}: когда удаляются результаты детей после успешной сборки
      * (docs/adr/0058-task-result-storage.md, docs/adr/0122-child-results-discard-sweep.md).
@@ -92,6 +111,26 @@ public class TaskcommProperties {
          * на процессоре (docs/adr/0061-processor-configuration-annotations.md).
          */
         private Map<String, TaskType> types = new LinkedHashMap<>();
+
+        /** Подстраховочный поллер: доводит шаги каскада, не доведённые из-за падения экземпляра. */
+        private Safety safety = new Safety();
+    }
+
+    /**
+     * Свойства {@code taskcomm.task.safety.*} (docs/adr/0126-safety-poller.md).
+     */
+    @Getter
+    @Setter
+    public static class Safety {
+
+        /** Такт подстраховочного поллера. */
+        private Duration interval = Duration.ofMinutes(1);
+
+        /**
+         * Сколько шаг каскада может не двигаться, прежде чем подстраховка его доведёт. Короче —
+         * подстраховка дублирует работу живых воркеров, длиннее — застрявшее ждёт дольше.
+         */
+        private Duration grace = Duration.ofMinutes(1);
     }
 
     /**

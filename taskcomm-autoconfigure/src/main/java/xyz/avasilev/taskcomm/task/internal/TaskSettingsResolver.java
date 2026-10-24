@@ -51,7 +51,8 @@ final class TaskSettingsResolver {
         this.pollers = pollers;
     }
 
-    TaskSettings resolve(final TaskProcessorRegistry registry, final ResultDiscard discard) {
+    TaskSettings resolve(
+            final TaskProcessorRegistry registry, final ResultDiscard discard, final SafetySettings safety) {
         this.yaml.forEach(this::readPhases);
         final Map<TaskSettings.Key, AttemptSettings> attempts = new HashMap<>();
         final Map<String, Integer> priorities = new HashMap<>();
@@ -82,7 +83,8 @@ final class TaskSettingsResolver {
         log.info(
                 "Итоговые настройки задач по типам и методам процессоров, в скобках — уровень значения:\n  {}",
                 String.join("\n  ", this.report));
-        return new TaskSettings(this.global, attempts, priorities, this.heartbeatTick(attempts), this.pollers, discard);
+        return new TaskSettings(
+                this.global, attempts, priorities, this.heartbeatTick(attempts), this.pollers, discard, safety);
     }
 
     private void readPhases(final String type, final TypeOverrides overrides) {

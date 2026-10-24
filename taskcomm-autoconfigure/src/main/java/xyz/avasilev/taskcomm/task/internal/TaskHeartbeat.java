@@ -51,6 +51,30 @@ class TaskHeartbeat {
             RETURNING a.id
             """;
 
+    /** Попытки, чью сущность или её предка отменили: отметка своей сущности и всех предков. */
+    private static final String CANCELLED = """
+            SELECT x.attempt_id
+              FROM unnest(CAST(:executionCreatedAt AS timestamptz[]), CAST(:attemptId AS uuid[]),
+                          CAST(:level AS text[]), CAST(:targetId AS uuid[]),
+                          CAST(:taskId AS uuid[]), CAST(:batchId AS uuid[]))
+                   AS x(execution_created_at, attempt_id, level, target_id, task_id, batch_id)
+             WHERE (x.level = 'TASK' AND EXISTS (SELECT 1 FROM tc_task e
+                        WHERE e.execution_created_at = x.execution_created_at AND e.id = x.target_id
+                          AND e.cancel_requested_at IS NOT NULL))
+                OR (x.level = 'BATCH' AND EXISTS (SELECT 1 FROM tc_task_batch e
+                        WHERE e.execution_created_at = x.execution_created_at AND e.id = x.target_id
+                          AND e.cancel_requested_at IS NOT NULL))
+                OR (x.level = 'UNIT' AND EXISTS (SELECT 1 FROM tc_task_unit e
+                        WHERE e.execution_created_at = x.execution_created_at AND e.id = x.target_id
+                          AND e.cancel_requested_at IS NOT NULL))
+                OR EXISTS (SELECT 1 FROM tc_task t
+                        WHERE t.execution_created_at = x.execution_created_at AND t.id = x.task_id
+                          AND t.cancel_requested_at IS NOT NULL)
+                OR EXISTS (SELECT 1 FROM tc_task_batch b
+                        WHERE b.execution_created_at = x.execution_created_at AND b.id = x.batch_id
+                          AND b.cancel_requested_at IS NOT NULL)
+            """;
+
     private final JdbcClient jdbc;
 
     private final TransactionTemplate transactions;
@@ -58,6 +82,8 @@ class TaskHeartbeat {
     private final Map<UUID, ClaimedAttempt> active = new ConcurrentHashMap<>();
 
     private final Set<UUID> lost = ConcurrentHashMap.newKeySet();
+
+    private final Set<UUID> cancelled = ConcurrentHashMap.newKeySet();
 
     /** Когда попытка продлена последний раз — по монотонным часам экземпляра, не базы. */
     private final Map<UUID, Long> renewedAt = new ConcurrentHashMap<>();
@@ -111,6 +137,7 @@ class TaskHeartbeat {
     void release(final ClaimedAttempt attempt) {
         this.active.remove(attempt.lease().attemptId());
         this.renewedAt.remove(attempt.lease().attemptId());
+        this.cancelled.remove(attempt.lease().attemptId());
         this.lost.remove(attempt.lease().attemptId());
     }
 
@@ -122,6 +149,52 @@ class TaskHeartbeat {
      */
     boolean isLost(final ClaimedAttempt attempt) {
         return this.lost.contains(attempt.lease().attemptId());
+    }
+
+    /**
+     * Отменена ли сущность попытки или её предок — по флагам, принесённым последним тактом
+     * (docs/adr/0070-cancellation-on-any-entity.md). Ответ из памяти; об отмене узнают через такт.
+     *
+     * @param attempt захваченная работа
+     * @return {@code true}, если отмена пришла
+     */
+    boolean isCancelled(final ClaimedAttempt attempt) {
+        return this.cancelled.contains(attempt.lease().attemptId());
+    }
+
+    /**
+     * Приносит в память флаги отмены сущностей всех выполняемых попыток и их предков — одним
+     * неблокирующим запросом на такт.
+     */
+    void refreshCancellations() {
+        final List<ClaimedAttempt> attempts = List.copyOf(this.active.values());
+        if (!attempts.isEmpty()) {
+            this.jdbc
+                    .sql(CANCELLED)
+                    .param(
+                            "executionCreatedAt",
+                            nullable(attempts, a -> TaskSql.parameter(a.target().executionCreatedAt())))
+                    .param("attemptId", nullable(attempts, a -> a.lease().attemptId()))
+                    .param("level", nullable(attempts, a -> a.target().level()))
+                    .param("targetId", nullable(attempts, a -> a.target().id()))
+                    .param(
+                            "taskId",
+                            nullable(
+                                    attempts,
+                                    a -> a.entity().parent() == null
+                                            ? null
+                                            : a.entity().parent().taskId()))
+                    .param(
+                            "batchId",
+                            nullable(
+                                    attempts,
+                                    a -> a.entity().parent() == null
+                                            ? null
+                                            : a.entity().parent().batchId()))
+                    .query(UUID.class)
+                    .list()
+                    .forEach(this.cancelled::add);
+        }
     }
 
     /**
@@ -198,5 +271,13 @@ class TaskHeartbeat {
      */
     private static String[] column(final List<ClaimedAttempt> attempts, final Function<ClaimedAttempt, ?> value) {
         return attempts.stream().map(value).map(String::valueOf).toArray(String[]::new);
+    }
+
+    /** Столбец, в котором бывают пустые значения: они уходят как {@code NULL}, а не как текст. */
+    private static String[] nullable(final List<ClaimedAttempt> attempts, final Function<ClaimedAttempt, ?> value) {
+        return attempts.stream()
+                .map(value)
+                .map(item -> item == null ? null : String.valueOf(item))
+                .toArray(String[]::new);
     }
 }

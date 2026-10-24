@@ -39,6 +39,7 @@ import xyz.avasilev.taskcomm.task.api.TaskRetry;
 import xyz.avasilev.taskcomm.task.api.TaskService;
 import xyz.avasilev.taskcomm.task.internal.TaskEngine;
 import xyz.avasilev.taskcomm.task.internal.TaskProcessorRegistry;
+import xyz.avasilev.taskcomm.task.internal.TaskStartup;
 
 /**
  * Обязательные сценарии автоконфигурации задач (CLAUDE.md, раздел «Тесты») на настоящем
@@ -187,8 +188,8 @@ class TaskcommTaskAutoConfigurationIT {
     void runsPollersAndHeartbeatOnSchedulerMarkedWithQualifier() {
         this.contextRunner.withUserConfiguration(QualifiedScheduler.class).run(context -> {
             assertThat(context).hasNotFailed();
-            // такт партиций, такт основного поллера, heartbeat и подметальщик результатов детей
-            assertThat(context.getBean(CountingScheduler.class).scheduled.get()).isEqualTo(4);
+            // такт партиций, такт основного поллера, heartbeat, подстраховка и подметальщик результатов детей
+            assertThat(context.getBean(CountingScheduler.class).scheduled.get()).isEqualTo(5);
         });
     }
 
@@ -202,7 +203,7 @@ class TaskcommTaskAutoConfigurationIT {
                     assertThat(context.getBean(CountingScheduler.class)
                                     .scheduled
                                     .get())
-                            .isEqualTo(3);
+                            .isEqualTo(4);
                 });
     }
 
@@ -216,6 +217,26 @@ class TaskcommTaskAutoConfigurationIT {
                         .rootCause()
                         .isInstanceOf(TaskcommConfigurationException.class)
                         .hasMessageContaining("отрицательным"));
+    }
+
+    @Test
+    void failsOnZeroSafetyGrace() {
+        this.contextRunner
+                .withPropertyValues("taskcomm.task.safety.grace=0s")
+                .run(context -> assertThat(context)
+                        .getFailure()
+                        .hasStackTraceContaining("taskcomm.task.safety: ")
+                        .rootCause()
+                        .isInstanceOf(TaskcommConfigurationException.class)
+                        .hasMessageContaining("grace"));
+    }
+
+    @Test
+    void preparesTasksAtStartupBeforeEngine() {
+        this.contextRunner.run(context -> {
+            assertThat(context).hasNotFailed();
+            assertThat(context).hasSingleBean(TaskStartup.class);
+        });
     }
 
     @Test

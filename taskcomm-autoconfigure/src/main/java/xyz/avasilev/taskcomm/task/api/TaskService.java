@@ -133,4 +133,33 @@ public interface TaskService {
      * @throws IllegalArgumentException если класс не совпадает с результатом процессора
      */
     <RT> Optional<RT> result(Task<?> task, Class<RT> resultType);
+
+    /**
+     * Отменяет задачу целиком (docs/adr/0070-cancellation-on-any-entity.md,
+     * docs/adr/0125-task-cancel-api.md). Отметка ставится только на задаче; не начинавшиеся
+     * потомки становятся {@code SKIPPED}, ждавшие повтора — {@code CANCELLED}, работающие доигрывают
+     * и пишут настоящий исход. Сборка у отменённой задачи не запускается, если ещё не началась.
+     * Отменённое не перезапускается никогда (docs/adr/0071-no-restart-after-cancel.md).
+     *
+     * @param task задача
+     * @return принята отмена или отвергнута — у терминальной и уже отменённой задачи
+     */
+    TaskCancelResult cancel(Task<?> task);
+
+    /**
+     * Отменяет группу, не трогая остальную задачу: задача доработает и закончится по своду,
+     * в котором отменённая группа считается неуспешной.
+     *
+     * @param batch группа
+     * @return принята отмена или отвергнута
+     */
+    TaskCancelResult cancel(TaskBatch<?> batch);
+
+    /**
+     * Отменяет одну подзадачу.
+     *
+     * @param unit подзадача
+     * @return принята отмена или отвергнута
+     */
+    TaskCancelResult cancel(TaskUnit<?> unit);
 }

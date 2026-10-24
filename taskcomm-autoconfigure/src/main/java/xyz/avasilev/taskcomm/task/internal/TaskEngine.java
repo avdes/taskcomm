@@ -24,7 +24,7 @@ import xyz.avasilev.taskcomm.execution.internal.UuidV7;
  * Движок задач экземпляра: поллеры со своими пулами воркеров и поток heartbeat
  * (docs/adr/0063-claim-ordering-and-pollers.md, docs/adr/0025-lease-mechanics.md).
  *
- * <p>Такты поллеров, heartbeat и подметальщика результатов детей идут на планировщике стартера — помеченном
+ * <p>Такты поллеров, heartbeat, подстраховочного поллера и подметальщика результатов детей идут на планировщике стартера — помеченном
  * {@code @TaskcommScheduler} или собственном, который движок заводит и останавливает сам; бином
  * он не регистрируется (docs/adr/0096-no-foreign-type-beans.md). Пулы воркеров — по одному
  * на поллер, их создаёт только стартер; потоки — из фабрики под {@code @TaskcommWorkerThreadFactory}
@@ -48,6 +48,10 @@ public class TaskEngine implements SmartLifecycle {
     private final TaskHeartbeat heartbeat;
 
     private final TaskResultDiscard discard;
+
+    private final TaskSafetyPoller safety;
+
+    private final Duration safetyInterval;
 
     private final Duration heartbeatTick;
 
@@ -94,6 +98,12 @@ public class TaskEngine implements SmartLifecycle {
                 instance);
         final TaskChildren children = new TaskChildren(dataSource, transactionManager, layout);
         this.discard = new TaskResultDiscard(dataSource, transactionManager, settings.discard());
+        this.safety = new TaskSafetyPoller(
+                dataSource,
+                children,
+                new TaskCancellation(dataSource, transactionManager, children),
+                settings.safety());
+        this.safetyInterval = settings.safety().interval();
         final TaskAttemptCloser closer = new TaskAttemptCloser(
                 dataSource,
                 transactionManager,
@@ -134,6 +144,8 @@ public class TaskEngine implements SmartLifecycle {
         }
         this.futures.add(scheduler.scheduleWithFixedDelay(
                 this::renewLeases, Instant.now().plus(this.heartbeatTick), this.heartbeatTick));
+        this.futures.add(scheduler.scheduleWithFixedDelay(
+                this::runSafety, Instant.now().plus(this.safetyInterval), this.safetyInterval));
         if (this.discard.enabled()) {
             this.futures.add(scheduler.scheduleWithFixedDelay(
                     this::sweepResults,
@@ -175,8 +187,17 @@ public class TaskEngine implements SmartLifecycle {
     private void renewLeases() {
         try {
             this.heartbeat.renewDue(this.heartbeatTick);
+            this.heartbeat.refreshCancellations();
         } catch (final RuntimeException failure) {
             log.warn("Heartbeat задач: продление аренд не удалось, повтор на следующем такте", failure);
+        }
+    }
+
+    private void runSafety() {
+        try {
+            this.safety.tick();
+        } catch (final RuntimeException failure) {
+            log.warn("Подстраховочный поллер задач: такт не удался, повтор на следующем", failure);
         }
     }
 

@@ -5,6 +5,9 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * Мелкие приёмы SQL подсистемы задач. Похожие есть у кода схемы, но общего кода у подсистемы
@@ -35,6 +38,20 @@ final class TaskSql {
      */
     static double seconds(final Duration duration) {
         return duration.toNanos() / 1e9;
+    }
+
+    /**
+     * Шаблон своих коротких транзакций стартера: всегда новая транзакция и явный
+     * {@code READ COMMITTED}, без опоры на умолчание базы (docs/adr/0095-dedup-requires-read-committed.md).
+     *
+     * @param transactionManager менеджер транзакций стартера
+     * @return шаблон транзакций
+     */
+    static TransactionTemplate transactions(final PlatformTransactionManager transactionManager) {
+        final TransactionTemplate transactions = new TransactionTemplate(transactionManager);
+        transactions.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        transactions.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+        return transactions;
     }
 
     /**

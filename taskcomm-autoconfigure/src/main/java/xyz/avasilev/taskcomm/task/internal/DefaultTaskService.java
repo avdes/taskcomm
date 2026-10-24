@@ -9,6 +9,7 @@ import java.util.UUID;
 import java.util.function.Supplier;
 import javax.sql.DataSource;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.util.ClassUtils;
 import org.springframework.util.function.SingletonSupplier;
 import xyz.avasilev.taskcomm.TaskcommException;
@@ -18,10 +19,13 @@ import xyz.avasilev.taskcomm.execution.api.OriginRelation;
 import xyz.avasilev.taskcomm.execution.api.OriginType;
 import xyz.avasilev.taskcomm.execution.internal.CurrentExecution;
 import xyz.avasilev.taskcomm.task.api.Task;
+import xyz.avasilev.taskcomm.task.api.TaskBatch;
+import xyz.avasilev.taskcomm.task.api.TaskCancelResult;
 import xyz.avasilev.taskcomm.task.api.TaskProcessor;
 import xyz.avasilev.taskcomm.task.api.TaskService;
 import xyz.avasilev.taskcomm.task.api.TaskStatus;
 import xyz.avasilev.taskcomm.task.api.TaskSubmitOptions;
+import xyz.avasilev.taskcomm.task.api.TaskUnit;
 
 /**
  * {@link TaskService} поверх создания задачи и чтения таблиц задач
@@ -74,6 +78,8 @@ public class DefaultTaskService implements TaskService {
 
     private final JdbcClient jdbc;
 
+    private final Supplier<TaskCancellation> cancellation;
+
     /**
      * Собирает сервис.
      *
@@ -85,19 +91,50 @@ public class DefaultTaskService implements TaskService {
      * @param settings итоговые настройки — приоритет и шаг дедлайна по типу
      * @param creator создание задачи
      * @param codec кодек нагрузок и результатов
-     * @param dataSource {@code DataSource} стартера — для чтений
+     * @param dataSource {@code DataSource} стартера — для чтений и отмены
+     * @param transactionManager менеджер транзакций стартера — для отмены
      */
     public DefaultTaskService(
             final Supplier<TaskProcessorRegistry> registry,
             final Supplier<TaskSettings> settings,
             final TaskCreator creator,
             final TaskPayloadCodec codec,
-            final DataSource dataSource) {
+            final DataSource dataSource,
+            final PlatformTransactionManager transactionManager) {
         this.registry = SingletonSupplier.of(registry);
         this.settings = SingletonSupplier.of(settings);
         this.creator = creator;
         this.codec = codec;
         this.jdbc = JdbcClient.create(dataSource);
+        this.cancellation = SingletonSupplier.of(() -> new TaskCancellation(
+                dataSource,
+                transactionManager,
+                new TaskChildren(
+                        dataSource, transactionManager, this.settings.get().pollers())));
+    }
+
+    @Override
+    public TaskCancelResult cancel(final Task<?> task) {
+        return this.cancellation
+                .get()
+                .cancel(new TaskEntityRef(
+                        TaskLevel.TASK, task.id(), task.executionRef().createdAt()));
+    }
+
+    @Override
+    public TaskCancelResult cancel(final TaskBatch<?> batch) {
+        return this.cancellation
+                .get()
+                .cancel(new TaskEntityRef(
+                        TaskLevel.BATCH, batch.id(), batch.executionRef().createdAt()));
+    }
+
+    @Override
+    public TaskCancelResult cancel(final TaskUnit<?> unit) {
+        return this.cancellation
+                .get()
+                .cancel(new TaskEntityRef(
+                        TaskLevel.UNIT, unit.id(), unit.executionRef().createdAt()));
     }
 
     @Override
