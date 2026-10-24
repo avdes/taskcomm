@@ -34,9 +34,10 @@ import org.springframework.stereotype.Service;
  *
  * <p>Подсистемы перечислены явно. Добавление новой подсистемы требует дописать сюда правила.
  *
- * <p>{@code allowEmptyShould(true)} стоит там, где в {@code that()} пока нет ни одного класса:
- * ArchUnit по умолчанию валит такое правило — это защита от опечатки в предикате, а не сигнал,
- * что правило нужно ослаблять, когда классы появятся.
+ * <p>{@code allowEmptyShould(true)} стоит только там, где в {@code that()} пока нет ни одного
+ * класса, — у коммуникаций и REST. ArchUnit по умолчанию валит такое правило — это защита
+ * от опечатки в предикате. С появлением первого класса в пакете послабление обязано уйти, иначе
+ * правило продолжит молча ничего не проверять.
  */
 @AnalyzeClasses(packages = "xyz.avasilev.taskcomm", importOptions = ImportOption.DoNotIncludeTests.class)
 class ArchitectureTest {
@@ -58,8 +59,7 @@ class ArchitectureTest {
             .resideOutsideOfPackages(TASK, AUTOCONFIGURE)
             .should()
             .dependOnClassesThat()
-            .resideInAPackage(TASK_INTERNAL)
-            .allowEmptyShould(true);
+            .resideInAPackage(TASK_INTERNAL);
 
     @ArchTest
     static final ArchRule COMMUNICATION_INTERNAL_STAYS_WITHIN_COMMUNICATION_SUBSYSTEM = noClasses()
@@ -67,8 +67,7 @@ class ArchitectureTest {
             .resideOutsideOfPackages(COMMUNICATION, AUTOCONFIGURE)
             .should()
             .dependOnClassesThat()
-            .resideInAPackage(COMMUNICATION_INTERNAL)
-            .allowEmptyShould(true);
+            .resideInAPackage(COMMUNICATION_INTERNAL);
 
     @ArchTest
     static final ArchRule EXECUTION_INTERNAL_SHARED_ONLY_WITH_ENGINE_INTERNALS = noClasses()
@@ -76,8 +75,7 @@ class ArchitectureTest {
             .resideOutsideOfPackages(EXECUTION, AUTOCONFIGURE, TASK_INTERNAL, COMMUNICATION_INTERNAL)
             .should()
             .dependOnClassesThat()
-            .resideInAPackage(EXECUTION_INTERNAL)
-            .allowEmptyShould(true);
+            .resideInAPackage(EXECUTION_INTERNAL);
 
     @ArchTest
     static final ArchRule API_DOES_NOT_DEPEND_ON_INTERNAL = noClasses()
@@ -85,8 +83,7 @@ class ArchitectureTest {
             .resideInAPackage("..api..")
             .should()
             .dependOnClassesThat()
-            .resideInAPackage("..internal..")
-            .allowEmptyShould(true);
+            .resideInAPackage("..internal..");
 
     @ArchTest
     static final ArchRule TASK_DOES_NOT_DEPEND_ON_COMMUNICATION = noClasses()
@@ -94,8 +91,7 @@ class ArchitectureTest {
             .resideInAPackage(TASK)
             .should()
             .dependOnClassesThat()
-            .resideInAPackage(COMMUNICATION)
-            .allowEmptyShould(true);
+            .resideInAPackage(COMMUNICATION);
 
     @ArchTest
     static final ArchRule COMMUNICATION_DOES_NOT_DEPEND_ON_TASK = noClasses()
@@ -112,8 +108,7 @@ class ArchitectureTest {
             .resideInAPackage(EXECUTION)
             .should()
             .dependOnClassesThat()
-            .resideInAnyPackage(TASK, COMMUNICATION)
-            .allowEmptyShould(true);
+            .resideInAnyPackage(TASK, COMMUNICATION);
 
     @ArchTest
     static final ArchRule SCHEMA_INTERNAL_USED_ONLY_BY_AUTOCONFIGURE = noClasses()
@@ -149,8 +144,7 @@ class ArchitectureTest {
             .orShould()
             .beAnnotatedWith(Service.class)
             .orShould()
-            .beAnnotatedWith(Repository.class)
-            .allowEmptyShould(true);
+            .beAnnotatedWith(Repository.class);
 
     private ArchitectureTest() {}
 }

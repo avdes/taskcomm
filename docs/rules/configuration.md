@@ -122,6 +122,11 @@ taskcomm:
 приоритет свойство сущности, а не попытки, — поэтому там это падение при старте
 ([ADR 0084](../adr/0084-priority-only-per-type.md)).
 
+Состав `@TaskProcessorSettings` — девять плоских атрибутов, «не задано» — ноль или пустая строка;
+сокращения `@TaskPriority` (только на классе), `@TaskLease`, `@TaskRetry` связаны с ней через
+`@AliasFor`; несколько аннотаций на одном месте складываются, один атрибут дважды — падение при
+старте ([ADR 0113](../adr/0113-task-processor-settings-attributes.md)).
+
 Аннотаций **две, по одной на подсистему** ([ADR 0066](../adr/0066-processor-settings-annotation-names.md)):
 `@TaskProcessorSettings` в `task.api` и `@CommunicationProcessorSettings` в `communication.api`.
 Общая на обе подсистемы запрещена тем же правилом, что и общий код.

@@ -104,41 +104,47 @@
 
 ## 2. Публичный API задач
 
-- [ ] `Execution`, `ExecutionRef`; `ExecutionRepository` — в `internal`, не SPI
+- [x] `Execution`, `ExecutionRef`; `ExecutionRepository` — в `internal`, не SPI
       ([ADR 0089](adr/0089-no-storage-spi-explicit-extension-points.md))
-- [ ] `ExecutionService` — **нужен**, вопрос закрыт [ADR 0064](adr/0064-entity-origin-links.md):
+- [x] `ExecutionService` — **нужен**, вопрос закрыт [ADR 0064](adr/0064-entity-origin-links.md):
       первые потребители это чтение состава дела из `collect` (коммуникации дела по
       `source` / `destination`, задача дела по типу и её результат). Остаётся определить состав
       операций. Ограничение: из `process` подзадачи состав дела не читают — миллион подзадач дадут
       миллион запросов
-- [ ] `Origin` — необязательное значение на `Task` и `Communication`: тип создателя, id, попытка,
+- [x] `Origin` — необязательное значение на `Task` и `Communication`: тип создателя, id, попытка,
       вид связи ([ADR 0064](adr/0064-entity-origin-links.md)). У детей раскрытия его нет
-- [ ] `Task`, `TaskBatch`, `TaskUnit`; статусы — три раздельных перечисления `TaskStatus`,
+- [x] `Task`, `TaskBatch`, `TaskUnit`; статусы — три раздельных перечисления `TaskStatus`,
       `TaskBatchStatus`, `TaskUnitStatus` ([ADR 0068](adr/0068-expansion-children-statuses.md));
       тест сверки с `CHECK`
-- [ ] `TaskProcessor` и три наследника с полным набором параметров типа:
+- [x] `TaskProcessor` и три наследника с полным набором параметров типа:
       `FlatTaskProcessor<T, RT>`, `UnitTaskProcessor<T, U, RU, RT>`,
       `BatchTaskProcessor<T, B, U, RU, RB, RT>` ([ADR 0059](adr/0059-collect-contract.md))
-- [ ] `Emitter`, контекст обработки: `skip(reason)`, `doNotRetry(reason)`, `shouldStop()`,
+- [x] `Emitter`, контекст обработки: `skip(reason)`, `doNotRetry(reason)`, `shouldStop()`,
       `executionRef()`, `SearchableField`. Контекст — параметр каждого метода процессора, а не поле
-- [ ] Аннотации настроек на процессоре — на классе и на методе
+- [x] Аннотации настроек на процессоре — на классе и на методе
       ([ADR 0061](adr/0061-processor-configuration-annotations.md)); `@TaskProcessorSettings`
       здесь, `@CommunicationProcessorSettings` — на этапе 5
       ([ADR 0066](adr/0066-processor-settings-annotation-names.md)); приоритет — только на классе,
       на методе и в `phases.*` — падение при старте ([ADR 0084](adr/0084-priority-only-per-type.md))
-- [ ] `collect` и `collectBatch`; возвращаемые значения у `process` и `collect`,
+- [x] `collect` и `collectBatch`; возвращаемые значения у `process` и `collect`,
       `expand` остаётся `void`
-- [ ] Обёртки потока сборки `CollectedUnit` и `CollectedBatch`: id, нагрузка, результат, статус,
+- [x] Обёртки потока сборки `CollectedUnit` и `CollectedBatch`: id, нагрузка, результат, статус,
       описание статуса
-- [ ] Явный отказ от наследования `Execution` при создании сущности; явная передача дела
+- [x] Явный отказ от наследования `Execution` при создании сущности; явная передача дела
       необязательным `ExecutionRef` в методах создания ([ADR 0056](adr/0056-execution-ref.md))
-- [ ] `TaskService`; `TaskRepository` — в `internal`, не SPI; необязательное «не раньше» при постановке
-- [ ] Снять `allowEmptyShould(true)` с правил в `ArchitectureTest` ([ADR 0087](adr/0087-architecture-rules.md)) — на этапе 0 пакеты
+- [x] `TaskService`; `TaskRepository` — в `internal`, не SPI; необязательное «не раньше» при постановке
+- [x] Снять `allowEmptyShould(true)` с правил в `ArchitectureTest` ([ADR 0087](adr/0087-architecture-rules.md)) — на этапе 0 пакеты
       `api`/`internal` пусты (`package-info.java` без аннотаций не даёт `.class`), и правила
       про них проходят вхолостую. Как только появятся настоящие классы, послабление обязано
       уйти, иначе правило продолжит молча ничего не проверять
 
 **Готово, когда** потребитель может скомпилировать процессор, ничего не запуская.
+Проверено: `ProcessorContractsTest` компилирует процессоры всех трёх контрактов, разбор
+запечатанной иерархии без `default` и постановку по классу процессора; `EnumCheckConstraintIT`
+сверяет перечисления с `CHECK`; `clean build publishToMavenLocal` — 38 модульных и 31
+интеграционный тест. Решения этапа — [ADR 0110](adr/0110-execution-composition-reads-in-subsystems.md)–[0113](adr/0113-task-processor-settings-attributes.md).
+Здесь только типы: реализации `TaskService`, `ExecutionService` и репозиториев — этап 3, проверки
+аннотаций настроек при старте — этап 4.
 
 ## 3. Персистентность задач
 
@@ -207,7 +213,13 @@
       по типам и фазам с указанием уровня** ([ADR 0060](adr/0060-retry-and-lease-configuration.md),
       [ADR 0061](adr/0061-processor-configuration-annotations.md)); падение при
       `heartbeat-interval >= duration` по каждому итоговому значению аренды, с типом, фазой
-      и уровнем в сообщении ([ADR 0103](adr/0103-heartbeat-not-shorter-than-lease-fails.md))
+      и уровнем в сообщении ([ADR 0103](adr/0103-heartbeat-not-shorter-than-lease-fails.md));
+      аннотации настроек читаются через `MergedAnnotations` со сложением `@TaskProcessorSettings`,
+      `@TaskPriority`, `@TaskLease`, `@TaskRetry`; один атрибут дважды на одном месте и приоритет
+      на методе — падение при старте ([ADR 0084](adr/0084-priority-only-per-type.md),
+      [ADR 0113](adr/0113-task-processor-settings-attributes.md))
+- [ ] Значения `attemptNumber()` и `isRetry()` контекста обработки — при захвате, из строк попыток
+      ([ADR 0112](adr/0112-attempt-number-in-processing-context.md))
 - [ ] `doNotRetry(reason)` и `shouldStop()` в контекстах обеих подсистем
       ([ADR 0062](adr/0062-non-retryable-failure.md))
 - [ ] Запись попытки при захвате и закрытие по завершении; исход `LEASE_LOST` пишет переподхват,

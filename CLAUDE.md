@@ -145,12 +145,13 @@ taskcomm/
 xyz.avasilev.taskcomm          TaskcommException и его общие наследники — публичный API,
 │                              доступный всем пакетам без связи между подсистемами
 ├── execution/
-│   ├── api/           публичный API: Execution, ExecutionRef, ExecutionService
+│   ├── api/           публичный API: Execution, ExecutionRef, ExecutionService, Origin
 │   └── internal/      реализация, ExecutionRepository, держатель текущего дела
 ├── task/
-│   ├── api/           публичный API: Task, TaskBatch, TaskUnit, TaskService,
+│   ├── api/           публичный API: Task, TaskBatch, TaskUnit, TaskService, TaskSubmitOptions,
 │   │                  TaskProcessor и три его наследника, Emitter, SearchableField,
-│   │                  контекст обработки (skip(reason), doNotRetry(reason), shouldStop(), executionRef())
+│   │                  @TaskProcessorSettings и сокращения, контекст обработки (skip(reason),
+│   │                  doNotRetry(reason), shouldStop(), executionRef(), attemptNumber(), isRetry())
 │   └── internal/      реализация: сервисы, TaskRepository и его JDBC-реализация, поллер, retry
 ├── communication/
 │   ├── api/           публичный API: Communication, CommunicationService, значения-запросы приёма,
@@ -355,7 +356,9 @@ public sealed interface Communication<C> {
   и тестов подавлено в `checkstyle-suppressions.xml`). Отдельно `MissingJavadocPackage` требует
   Javadoc в любом заведённом `package-info.java`, где бы он ни лежал.
 - Аббревиатуры в CamelCase: `SqlBuilder`, `JsonCodec`, `RestApiConfig` — не `SQLBuilder`
-  и не `RestAPIConfig` (`AbbreviationAsWordInName`).
+  и не `RestAPIConfig` (`AbbreviationAsWordInName`). Исключение — суффикс `IT` интеграционных тестов.
+- Параметр типа — одна буква или `R` и буква: буква уровня, `R` с тем же суффиксом — результат
+  уровня, `T`, `RT`, `RU`, `RB` ([ADR 0059](docs/adr/0059-collect-contract.md)).
 - Не более трёх `return` на метод, фигурные скобки обязательны даже для однострочников.
 - `org.junit.jupiter.api.Assertions` запрещён импортом — только AssertJ.
 

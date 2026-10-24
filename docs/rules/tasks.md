@@ -38,6 +38,17 @@ BatchTaskProcessor<T, B, U, RU, RB, RT>
 `ProcessingContext` идёт **параметром каждого метода**, а не полем процессора: иначе `executionRef()`
 неоткуда взять ([ADR 0056](../adr/0056-execution-ref.md)).
 
+**Методов у контекста шесть**: `skip(reason)`, `doNotRetry(reason)`, `shouldStop()`, `executionRef()`,
+`attemptNumber()` и `isRetry()` ([ADR 0112](../adr/0112-attempt-number-in-processing-context.md)).
+`attemptNumber()` — номер среди попыток той же фазы с начала текущего цикла повторов, с единицы;
+`isRetry()` — была ли у сущности более ранняя попытка той же фазы за всю историю, включая время
+до ручного перезапуска. Все шесть отвечают из памяти, без запроса к базе.
+
+**Форма публичного API задач** — [ADR 0111](../adr/0111-task-public-api-shape.md): сущности —
+интерфейсы со статусом-снимком; постановка `submit` — по строке типа и по классу процессора,
+с перегрузками для нагрузки и `ExecutionRef` и с `TaskSubmitOptions` для редких сочетаний,
+возвращает `Task<T>`; чтения состава дела и результат задачи — в `TaskService`.
+
 **Имя интерфейса и значение `contract_shape` читаются одинаково**: `FlatTaskProcessor` → `FLAT`,
 `UnitTaskProcessor` → `UNIT`, `BatchTaskProcessor` → `BATCH`. Держать это правило и при появлении
 четвёртого контракта ([ADR 0045](../adr/0045-flat-task-processor.md)).

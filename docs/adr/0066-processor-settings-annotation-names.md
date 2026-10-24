@@ -2,6 +2,8 @@
 
 - **Дата:** 2026-10-07
 - **Статус:** принято
+- **Изменено:** [0113](0113-task-processor-settings-attributes.md) — состав `@TaskProcessorSettings`
+  определён: девять плоских атрибутов и сокращения `@TaskPriority`, `@TaskLease`, `@TaskRetry`.
 
 ## Контекст
 

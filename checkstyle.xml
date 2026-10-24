@@ -175,11 +175,20 @@
         <module name="LocalVariableName"/>
         <module name="LocalFinalVariableName"/>
         <module name="PatternVariableName"/>
-        <module name="ClassTypeParameterName"/>
+        <!-- Одна буква уровня или R и буква уровня — результат этого уровня (docs/adr/0059): T, RT, RU, RB. -->
+        <module name="ClassTypeParameterName">
+            <property name="format" value="^R?[A-Z]$"/>
+        </module>
         <module name="RecordComponentName"/>
-        <module name="RecordTypeParameterName"/>
-        <module name="MethodTypeParameterName"/>
-        <module name="InterfaceTypeParameterName"/>
+        <module name="RecordTypeParameterName">
+            <property name="format" value="^R?[A-Z]$"/>
+        </module>
+        <module name="MethodTypeParameterName">
+            <property name="format" value="^R?[A-Z]$"/>
+        </module>
+        <module name="InterfaceTypeParameterName">
+            <property name="format" value="^R?[A-Z]$"/>
+        </module>
         <module name="IllegalIdentifierName"/>
         <module name="AbbreviationAsWordInName">
             <property name="ignoreFinal" value="false"/>
