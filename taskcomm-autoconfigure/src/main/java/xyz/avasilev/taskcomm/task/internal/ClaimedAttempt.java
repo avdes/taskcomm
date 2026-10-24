@@ -1,24 +1,30 @@
 package xyz.avasilev.taskcomm.task.internal;
 
-import java.util.UUID;
-
 /**
  * Захваченная работа — открытая попытка под арендой этого экземпляра и сущность, над которой
  * она идёт.
  *
  * @param lease аренда попытки
  * @param target сущность попытки
- * @param executionId дело сущности
  * @param taskType тип задачи
  * @param phase фаза попытки
- * @param priority приоритет сущности
- * @param payload нагрузка сущности в JSON
+ * @param history номер попытки и признак повтора
+ * @param entity снимок сущности на момент захвата
  */
 record ClaimedAttempt(
         AttemptLease lease,
         TaskEntityRef target,
-        UUID executionId,
         String taskType,
         TaskPhase phase,
-        int priority,
-        String payload) {}
+        AttemptHistory history,
+        ClaimedEntity entity) {
+
+    /**
+     * Метод процессора, которому принадлежит попытка.
+     *
+     * @return метод
+     */
+    ProcessorMethod method() {
+        return ProcessorMethod.of(this.target.level(), this.phase);
+    }
+}

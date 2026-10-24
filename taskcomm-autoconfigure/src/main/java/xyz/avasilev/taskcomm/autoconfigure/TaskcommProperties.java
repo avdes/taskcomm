@@ -43,6 +43,13 @@ public class TaskcommProperties {
     @Setter
     public static class Task {
 
+        /**
+         * Выключатель подсистемы задач. Действует вместе с корневым taskcomm.enabled:
+         * выключен любой из двух, и нет ни поллеров, ни heartbeat, ни TaskService
+         * (docs/adr/0090-root-switch-disables-everything.md).
+         */
+        private boolean enabled = true;
+
         /** Основной поллер. */
         private Poll poll = new Poll();
 
@@ -57,6 +64,95 @@ public class TaskcommProperties {
          * в двух поллерах, — падение при старте.
          */
         private Map<String, Poller> pollers = new LinkedHashMap<>();
+
+        /**
+         * Переопределения по типу задачи; ключ: taskType. Сильнее любой аннотации
+         * на процессоре (docs/adr/0061-processor-configuration-annotations.md).
+         */
+        private Map<String, TaskType> types = new LinkedHashMap<>();
+    }
+
+    /**
+     * Свойства типа задачи {@code taskcomm.task.types.<тип>.*}. Не заданное берётся с уровня
+     * слабее: аннотация на методе, на классе, глобальное значение.
+     */
+    @Getter
+    @Setter
+    public static class TaskType {
+
+        /**
+         * Приоритет задач типа по умолчанию. Шкала по возрастанию: меньше значит важнее.
+         * Задаётся только здесь, на уровне типа (docs/adr/0084-priority-only-per-type.md).
+         */
+        private Integer priority;
+
+        /** Аренда типа. */
+        private LeaseOverride lease = new LeaseOverride();
+
+        /** Повторы типа. */
+        private RetryOverride retry = new RetryOverride();
+
+        /**
+         * Переопределения по фазе: process, expand, collect; сильнее
+         * уровня типа. Фаза покрывает все методы фазы: у процессора с группами раскрытие идёт
+         * в expand и expandBatch.
+         */
+        private Map<String, TaskTypePhase> phases = new LinkedHashMap<>();
+    }
+
+    /** Свойства фазы типа {@code taskcomm.task.types.<тип>.phases.<фаза>.*}. */
+    @Getter
+    @Setter
+    public static class TaskTypePhase {
+
+        /**
+         * Не задаётся: приоритет — свойство задачи, а не попытки. Заданное значение — падение
+         * при старте (docs/adr/0084-priority-only-per-type.md); поле есть, чтобы ошибка не прошла
+         * молча.
+         */
+        private Integer priority;
+
+        /** Аренда фазы. */
+        private LeaseOverride lease = new LeaseOverride();
+
+        /** Повторы фазы. */
+        private RetryOverride retry = new RetryOverride();
+    }
+
+    /** Аренда уровня типа или фазы; не заданное — с уровня слабее. */
+    @Getter
+    @Setter
+    public static class LeaseOverride {
+
+        /** На сколько выдаётся и продлевается аренда. */
+        private Duration duration;
+
+        /** Такт продления аренды. */
+        private Duration heartbeatInterval;
+
+        /** Предел обработки. */
+        private Duration maxExecutionTime;
+    }
+
+    /** Повторы уровня типа или фазы; не заданное — с уровня слабее. */
+    @Getter
+    @Setter
+    public static class RetryOverride {
+
+        /** Лимит попыток фазы в цикле повторов. */
+        private Integer maxAttempts;
+
+        /** Первая задержка backoff. */
+        private Duration initialDelay;
+
+        /** Множитель backoff. */
+        private Double multiplier;
+
+        /** Верхняя граница задержки. */
+        private Duration maxDelay;
+
+        /** Доля джиттера в (0, 1]. */
+        private Double jitter;
     }
 
     /** Свойства {@code taskcomm.task.poll.*} (docs/adr/0063-claim-ordering-and-pollers.md). */

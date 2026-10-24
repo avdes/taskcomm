@@ -2,21 +2,32 @@ package xyz.avasilev.taskcomm.task.internal;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.support.TransactionTemplate;
+import tools.jackson.databind.json.JsonMapper;
 import xyz.avasilev.taskcomm.TestPostgres;
 import xyz.avasilev.taskcomm.execution.api.ExecutionRef;
+import xyz.avasilev.taskcomm.execution.api.Origin;
+import xyz.avasilev.taskcomm.execution.api.OriginRelation;
+import xyz.avasilev.taskcomm.execution.api.OriginType;
+import xyz.avasilev.taskcomm.execution.internal.CurrentExecution;
 import xyz.avasilev.taskcomm.schema.internal.RangeCalendar;
+import xyz.avasilev.taskcomm.task.api.FlatTaskProcessor;
+import xyz.avasilev.taskcomm.task.api.ProcessingContext;
+import xyz.avasilev.taskcomm.task.api.Task;
 
 /**
  * Оживление старой партиции на путях записи подсистемы задач
- * (docs/adr/0101-active-partition-horizon.md). Путь записи в старую партицию на этом этапе один —
- * постановка в существующее дело; дети раскрытия и перезапуск добавят свои тесты сюда же.
+ * (docs/adr/0101-active-partition-horizon.md): постановка в существующее дело и задача, поставленная
+ * из процессора сущности старого дела. Дети раскрытия и перезапуск добавят свои тесты сюда же.
  */
 class TaskPartitionRevivalIT {
 
@@ -45,6 +56,39 @@ class TaskPartitionRevivalIT {
                 .isEqualTo(1);
         this.db.advanceHorizon();
         assertThat(this.db.horizon()).isEqualTo(this.old);
+    }
+
+    @Test
+    void taskSubmittedFromProcessorOfOldExecutionLowersHorizonAndKeepsOrigin() {
+        final ExecutionRef execution = new ExecutionRef(UUID.randomUUID(), this.old.plus(5, ChronoUnit.DAYS));
+        final Origin creator =
+                new Origin(OriginType.TASK, UUID.randomUUID(), UUID.randomUUID(), OriginRelation.SPAWNED);
+        final TaskProcessorRegistry registry = new TaskProcessorRegistry(List.of(new Report()));
+        final TaskSettings settings = TaskSettings.resolve(
+                TaskTestSettings.settings(3, Duration.ZERO, Duration.ofMinutes(1)),
+                Map.of(),
+                registry,
+                TaskTestSettings.layout());
+        final DefaultTaskService service = new DefaultTaskService(
+                () -> registry,
+                () -> settings,
+                this.db.creator(),
+                new TaskPayloadCodec(JsonMapper.builder().build()),
+                this.db.dataSource);
+
+        final Task<String> task;
+        try (CurrentExecution.Scope _ = CurrentExecution.bind(new CurrentExecution.Binding(execution, creator))) {
+            task = service.submit(TaskTestDatabase.FLAT_TYPE, "дочерняя");
+        }
+
+        assertThat(task.executionRef()).isEqualTo(execution);
+        assertThat(task.origin()).contains(creator);
+        assertThat(this.db.horizon()).isEqualTo(this.old);
+        assertThat(this.db.count(
+                        "SELECT count(*) FROM " + RangeCalendar.partitionName("tc_task", this.old)
+                                + " WHERE id = :id AND origin_id IS NOT NULL",
+                        task.id()))
+                .isEqualTo(1);
     }
 
     @Test
@@ -107,5 +151,19 @@ class TaskPartitionRevivalIT {
                 .param("subkey", rangeKey)
                 .query(Boolean.class)
                 .single());
+    }
+
+    /** Плоский процессор типа задачи по умолчанию. */
+    static class Report implements FlatTaskProcessor<String, Void> {
+
+        @Override
+        public String taskType() {
+            return TaskTestDatabase.FLAT_TYPE;
+        }
+
+        @Override
+        public Void process(final Task<String> task, final ProcessingContext context) {
+            return null;
+        }
     }
 }

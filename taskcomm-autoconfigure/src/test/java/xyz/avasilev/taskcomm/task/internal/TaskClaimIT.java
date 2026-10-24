@@ -107,7 +107,7 @@ class TaskClaimIT {
         final ClaimedAttempt current = claimer.claim(DEADLINE, FLAT, 1).getFirst();
 
         assertThat(closer.succeed(late, "{\"late\":true}")).isFalse();
-        assertThat(closer.fail(late, "упал", false)).isFalse();
+        assertThat(closer.fail(late, "упал", "битая нагрузка")).isFalse();
 
         assertThat(this.db.status(TaskLevel.TASK, task.id())).isEqualTo("RUNNING");
         assertThat(this.attempt(late.lease().attemptId()).get("status")).isEqualTo("LEASE_LOST");
@@ -200,8 +200,8 @@ class TaskClaimIT {
                 this.db.claimer("worker-a", settings, () -> 0.5).claim(DEADLINE, FLAT, 2);
 
         for (final ClaimedAttempt attempt : claimed) {
-            final boolean retryable = attempt.target().id().equals(retried.id());
-            assertThat(closer.fail(attempt, "внешняя система недоступна", retryable))
+            final String doNotRetry = attempt.target().id().equals(retried.id()) ? null : "битая нагрузка";
+            assertThat(closer.fail(attempt, "внешняя система недоступна", doNotRetry))
                     .isTrue();
         }
 
@@ -213,7 +213,7 @@ class TaskClaimIT {
                         .param("id", forbidden.id())
                         .query(String.class)
                         .single())
-                .isEqualTo("внешняя система недоступна");
+                .isEqualTo("повторять запрещено: битая нагрузка");
     }
 
     @Test
@@ -297,7 +297,7 @@ class TaskClaimIT {
         assertThat(attempt.target().level()).isEqualTo(TaskLevel.UNIT);
         assertThat(attempt.target().id()).isEqualTo(unit);
         assertThat(attempt.phase()).isEqualTo(TaskPhase.PROCESS);
-        assertThat(attempt.payload()).contains("A-1");
+        assertThat(attempt.entity().payload()).contains("A-1");
         assertThat(this.db.status(TaskLevel.UNIT, unit)).isEqualTo("RUNNING");
         assertThat(this.db.closer(settings).succeed(attempt, null)).isTrue();
         assertThat(this.db.status(TaskLevel.UNIT, unit)).isEqualTo("SUCCEEDED");

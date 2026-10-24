@@ -88,12 +88,27 @@ final class TaskcommBeanSelection {
      * @throws TaskcommConfigurationException если помеченных бинов больше одного
      */
     static TaskScheduler scheduler(final ObjectProvider<TaskScheduler> qualified) {
-        final List<TaskScheduler> schedulers = qualified.orderedStream().toList();
-        if (schedulers.size() > 1) {
+        return replacement(qualified, TaskScheduler.class, "@TaskcommScheduler");
+    }
+
+    /**
+     * Бин потребителя под квалификатором точки замены, если он объявлен
+     * (docs/adr/0096-no-foreign-type-beans.md).
+     *
+     * @param qualified бины под квалификатором
+     * @param type тип бина — для сообщения
+     * @param qualifier имя квалификатора — для сообщения
+     * @param <T> тип бина
+     * @return бин потребителя или {@code null} — тогда стартер берёт своё
+     * @throws TaskcommConfigurationException если помеченных бинов больше одного
+     */
+    static <T> T replacement(final ObjectProvider<T> qualified, final Class<T> type, final String qualifier) {
+        final List<T> beans = qualified.orderedStream().toList();
+        if (beans.size() > 1) {
             throw new TaskcommConfigurationException(
-                    "Бинов TaskScheduler под @TaskcommScheduler " + schedulers.size() + ", а допустим один.");
+                    "Бинов " + type.getSimpleName() + " под " + qualifier + " " + beans.size() + ", а допустим один.");
         }
-        return schedulers.isEmpty() ? null : schedulers.getFirst();
+        return beans.isEmpty() ? null : beans.getFirst();
     }
 
     private static <T> T select(

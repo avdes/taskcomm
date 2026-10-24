@@ -1,5 +1,6 @@
 package xyz.avasilev.taskcomm.task.internal;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -9,6 +10,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
+import java.util.function.LongSupplier;
 import javax.sql.DataSource;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -57,6 +59,11 @@ class TaskHeartbeat {
 
     private final Set<UUID> lost = ConcurrentHashMap.newKeySet();
 
+    /** Когда попытка продлена последний раз — по монотонным часам экземпляра, не базы. */
+    private final Map<UUID, Long> renewedAt = new ConcurrentHashMap<>();
+
+    private final LongSupplier nanoClock;
+
     /**
      * Собирает heartbeat.
      *
@@ -64,6 +71,21 @@ class TaskHeartbeat {
      * @param transactionManager менеджер транзакций стартера
      */
     TaskHeartbeat(final DataSource dataSource, final PlatformTransactionManager transactionManager) {
+        this(dataSource, transactionManager, System::nanoTime);
+    }
+
+    /**
+     * Собирает heartbeat с заданными монотонными часами — для тестов расписания продлений.
+     *
+     * @param dataSource {@code DataSource} стартера
+     * @param transactionManager менеджер транзакций стартера
+     * @param nanoClock монотонные часы в наносекундах
+     */
+    TaskHeartbeat(
+            final DataSource dataSource,
+            final PlatformTransactionManager transactionManager,
+            final LongSupplier nanoClock) {
+        this.nanoClock = nanoClock;
         this.jdbc = JdbcClient.create(dataSource);
         this.transactions = new TransactionTemplate(transactionManager);
         this.transactions.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
@@ -77,6 +99,7 @@ class TaskHeartbeat {
      */
     void track(final ClaimedAttempt attempt) {
         this.lost.remove(attempt.lease().attemptId());
+        this.renewedAt.put(attempt.lease().attemptId(), this.nanoClock.getAsLong());
         this.active.put(attempt.lease().attemptId(), attempt);
     }
 
@@ -87,6 +110,7 @@ class TaskHeartbeat {
      */
     void release(final ClaimedAttempt attempt) {
         this.active.remove(attempt.lease().attemptId());
+        this.renewedAt.remove(attempt.lease().attemptId());
         this.lost.remove(attempt.lease().attemptId());
     }
 
@@ -101,12 +125,33 @@ class TaskHeartbeat {
     }
 
     /**
-     * Один такт: продлевает все попытки реестра одним запросом.
+     * Продлевает все попытки реестра одним запросом, не глядя на их интервалы.
      *
      * @return попытки, которые продлить не удалось и которые сняты с продления
      */
     Set<UUID> renew() {
-        final List<ClaimedAttempt> attempts = List.copyOf(this.active.values());
+        return this.renew(List.copyOf(this.active.values()));
+    }
+
+    /**
+     * Один такт потока heartbeat: продлевает одним запросом те попытки, чей интервал heartbeat
+     * истёк бы раньше следующего такта. Интервал свой у каждого метода процессора, а поток один
+     * на экземпляр и тикает с самым коротким интервалом; продление поэтому приходит не позже
+     * своего интервала, а предел обработки в продлениях не тратится чаще, чем задумано.
+     *
+     * @param tick период такта потока heartbeat
+     * @return попытки, которые продлить не удалось и которые сняты с продления
+     */
+    Set<UUID> renewDue(final Duration tick) {
+        final long now = this.nanoClock.getAsLong();
+        return this.renew(this.active.values().stream()
+                .filter(attempt ->
+                        now - this.renewedAt.getOrDefault(attempt.lease().attemptId(), now) + tick.toNanos()
+                                > attempt.lease().heartbeatInterval().toNanos())
+                .toList());
+    }
+
+    private Set<UUID> renew(final List<ClaimedAttempt> attempts) {
         if (attempts.isEmpty()) {
             return Set.of();
         }
@@ -133,10 +178,13 @@ class TaskHeartbeat {
         });
         final Set<UUID> notRenewed = new HashSet<>();
         attempts.forEach(attempt -> notRenewed.add(attempt.lease().attemptId()));
+        final long renewedNow = this.nanoClock.getAsLong();
         if (renewed != null) {
             renewed.forEach(notRenewed::remove);
+            renewed.forEach(id -> this.renewedAt.computeIfPresent(id, (key, previous) -> renewedNow));
         }
         notRenewed.forEach(id -> {
+            this.renewedAt.remove(id);
             if (this.active.remove(id) != null) {
                 this.lost.add(id);
             }

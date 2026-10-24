@@ -76,8 +76,9 @@ class TaskRetries {
         if (!retryable) {
             this.fail(jdbc, target.entity(), reason);
         } else {
-            final RetryPolicy policy =
-                    this.settings.settings(target.taskType(), target.phase()).retry();
+            final RetryPolicy policy = this.settings
+                    .settings(target.taskType(), target.entity().level(), target.phase())
+                    .retry();
             final int attempts = this.countAttempts(jdbc, target);
             if (policy.exhausted(attempts)) {
                 this.fail(jdbc, target.entity(), EXHAUSTED);

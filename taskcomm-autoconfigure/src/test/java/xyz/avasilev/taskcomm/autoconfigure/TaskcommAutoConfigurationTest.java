@@ -1,18 +1,22 @@
 package xyz.avasilev.taskcomm.autoconfigure;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
 
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ThreadFactory;
+import javax.sql.DataSource;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.sql.init.DatabaseInitializationMode;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.core.task.TaskDecorator;
 import org.springframework.scheduling.TaskScheduler;
+import xyz.avasilev.taskcomm.execution.api.ExecutionService;
+import xyz.avasilev.taskcomm.execution.internal.UuidV7;
 
 /**
  * Обязательные сценарии для автоконфигурации (CLAUDE.md, раздел «Тесты»): бины создаются
@@ -24,14 +28,24 @@ import org.springframework.scheduling.TaskScheduler;
  */
 class TaskcommAutoConfigurationTest {
 
-    private final ApplicationContextRunner contextRunner =
-            new ApplicationContextRunner().withConfiguration(AutoConfigurations.of(TaskcommAutoConfiguration.class));
+    /** Дело живёт в корне, поэтому корню нужен {@code DataSource}; соединений тест не открывает. */
+    private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
+            .withConfiguration(AutoConfigurations.of(TaskcommAutoConfiguration.class))
+            .withBean(DataSource.class, () -> mock(DataSource.class));
 
     @Test
     void createsPropertiesBeanByDefault() {
         this.contextRunner.run(context -> {
             assertThat(context).hasSingleBean(TaskcommProperties.class);
             assertThat(context.getBean(TaskcommProperties.class).isEnabled()).isTrue();
+        });
+    }
+
+    @Test
+    void createsExecutionServiceSharedBySubsystems() {
+        this.contextRunner.withPropertyValues("taskcomm.task.enabled=false").run(context -> {
+            assertThat(context).hasSingleBean(ExecutionService.class);
+            assertThat(context).hasSingleBean(UuidV7.class);
         });
     }
 
@@ -79,9 +93,10 @@ class TaskcommAutoConfigurationTest {
 
     @Test
     void backsOffWhenDisabledByProperty() {
-        this.contextRunner
-                .withPropertyValues("taskcomm.enabled=false")
-                .run(context -> assertThat(context).doesNotHaveBean(TaskcommProperties.class));
+        this.contextRunner.withPropertyValues("taskcomm.enabled=false").run(context -> {
+            assertThat(context).doesNotHaveBean(TaskcommProperties.class);
+            assertThat(context).doesNotHaveBean(ExecutionService.class);
+        });
     }
 
     @Test

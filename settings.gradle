@@ -41,6 +41,10 @@ dependencyResolutionManagement {
             library('spring-boot-starter', 'org.springframework.boot', 'spring-boot-starter').versionRef('spring-boot')
             library('spring-boot-starter-jdbc', 'org.springframework.boot', 'spring-boot-starter-jdbc').versionRef('spring-boot')
             library('spring-boot-jdbc', 'org.springframework.boot', 'spring-boot-jdbc').versionRef('spring-boot')
+            // Jackson 3 для нагрузки и результатов (docs/adr/0092): потребителю приезжает стартером Boot,
+            // код стартера видит только databind, версия — из BOM.
+            library('spring-boot-starter-jackson', 'org.springframework.boot', 'spring-boot-starter-jackson').versionRef('spring-boot')
+            library('jackson-databind', 'tools.jackson.core', 'jackson-databind').withoutVersion()
             library('spring-boot-starter-test', 'org.springframework.boot', 'spring-boot-starter-test').versionRef('spring-boot')
             library('spring-boot-configuration-processor', 'org.springframework.boot', 'spring-boot-configuration-processor').versionRef('spring-boot')
             library('spring-boot-autoconfigure-processor', 'org.springframework.boot', 'spring-boot-autoconfigure-processor').versionRef('spring-boot')

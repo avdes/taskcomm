@@ -10,6 +10,7 @@ import java.util.UUID;
  * @param attemptId идентификатор попытки
  * @param token токен аренды, новый на каждый захват
  * @param duration на сколько продлевается аренда
+ * @param heartbeatInterval как часто аренда продлевается — свой у метода процессора
  * @param maxRenewals предел обработки в продлениях
  */
-record AttemptLease(UUID attemptId, UUID token, Duration duration, int maxRenewals) {}
+record AttemptLease(UUID attemptId, UUID token, Duration duration, Duration heartbeatInterval, int maxRenewals) {}

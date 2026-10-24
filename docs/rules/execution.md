@@ -29,6 +29,9 @@
   возвращать типы задач и коммуникаций, агрегат пассивен. `ExecutionService` только находит само
   дело по идентификатору — по всем партициям
   ([ADR 0110](../adr/0110-execution-composition-reads-in-subsystems.md)).
+- **`ExecutionService` и хранилище дел живут в корневой автоконфигурации**, под одним
+  `taskcomm.enabled` ([ADR 0120](../adr/0120-execution-service-in-root-autoconfiguration.md)):
+  выключение одной подсистемы не отнимает дело у другой.
 - **Обход ловушки — явная передача** ([ADR 0056](../adr/0056-execution-ref.md)): `executionRef()`
   контекста обработки возвращает `ExecutionRef` — неизменяемую ссылку на текущее дело (id
   и `createdAt`, ключ партиционирования). Методы создания в `TaskService` и `CommunicationService`

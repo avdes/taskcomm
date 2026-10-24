@@ -23,6 +23,9 @@ import xyz.avasilev.taskcomm.execution.internal.UuidV7;
 @Slf4j
 class TaskAttemptCloser {
 
+    /** Начало причины {@code FAILED} у сущности, которой процессор запретил повтор. */
+    static final String DO_NOT_RETRY = "повторять запрещено: ";
+
     private static final String CLOSE = """
             UPDATE tc_task_attempt
                SET status = :status, status_description = :reason, finished_at = now(), updated_at = now()
@@ -41,6 +44,12 @@ class TaskAttemptCloser {
     private static final String SUCCEED = """
             UPDATE {table}
                SET status = 'SUCCEEDED', status_description = NULL, updated_at = now()
+             WHERE execution_created_at = :executionCreatedAt AND id = :targetId AND status = 'RUNNING'
+            """;
+
+    private static final String SKIP = """
+            UPDATE {table}
+               SET status = 'SKIPPED', status_description = :reason, updated_at = now()
              WHERE execution_created_at = :executionCreatedAt AND id = :targetId AND status = 'RUNNING'
             """;
 
@@ -96,19 +105,7 @@ class TaskAttemptCloser {
             throw new IllegalArgumentException("Успех фазы " + attempt.phase() + " закрывается по правилам своей фазы");
         }
         return this.close(attempt, AttemptStatus.SUCCEEDED, null, () -> {
-            if (result != null) {
-                this.jdbc
-                        .sql(INSERT_RESULT)
-                        .param("id", this.ids.next())
-                        .param(
-                                "executionCreatedAt",
-                                TaskSql.parameter(attempt.target().executionCreatedAt()))
-                        .param("attemptId", attempt.lease().attemptId())
-                        .param("level", attempt.target().level().name())
-                        .param("targetId", attempt.target().id())
-                        .param("result", result)
-                        .update();
-            }
+            this.insertResult(attempt, result);
             this.jdbc
                     .sql(SUCCEED.replace(
                             TaskRetries.TABLE, attempt.target().level().table()))
@@ -121,24 +118,75 @@ class TaskAttemptCloser {
     }
 
     /**
-     * Закрывает попытку неуспехом. Сущность возвращается в очередь с backoff либо, если лимит
-     * исчерпан или повтор запрещён, становится {@code FAILED}.
+     * Закрывает попытку обработки пропуском: процессор вызвал {@code skip(reason)} и вернулся
+     * нормально (docs/adr/0082-skip-on-every-level.md). Сущность становится {@code SKIPPED}
+     * с причиной. Результат пишется по тому же правилу, что при успехе: всё, что вернулось
+     * не {@code null} (docs/adr/0058-task-result-storage.md).
+     *
+     * <p>Пока здесь только фаза обработки; пропуск в раскрытии и сборке закрывается по правилам
+     * своих фаз.
      *
      * @param attempt захваченная работа
-     * @param reason причина — текст исключения или причина запрета повтора
-     * @param retryable {@code false}, если процессор запретил повтор
+     * @param reason причина пропуска от процессора
+     * @param result результат в JSON или {@code null}
+     * @return {@code true}, если попытка была ещё открыта и закрыта этим вызовом
+     * @throws IllegalArgumentException если это не попытка обработки
+     */
+    boolean skip(final ClaimedAttempt attempt, final String reason, final String result) {
+        if (attempt.phase() != TaskPhase.PROCESS) {
+            throw new IllegalArgumentException(
+                    "Пропуск фазы " + attempt.phase() + " закрывается по правилам своей фазы");
+        }
+        return this.close(attempt, AttemptStatus.SKIPPED, reason, () -> {
+            this.insertResult(attempt, result);
+            this.jdbc
+                    .sql(SKIP.replace(
+                            TaskRetries.TABLE, attempt.target().level().table()))
+                    .param("reason", reason)
+                    .param(
+                            "executionCreatedAt",
+                            TaskSql.parameter(attempt.target().executionCreatedAt()))
+                    .param("targetId", attempt.target().id())
+                    .update();
+        });
+    }
+
+    /**
+     * Закрывает попытку неуспехом. Сущность возвращается в очередь с backoff либо, если лимит
+     * исчерпан или повтор запрещён, становится {@code FAILED}. Причина на сущности различает
+     * «повторять запрещено» и «попытки исчерпаны» (docs/adr/0062-non-retryable-failure.md).
+     *
+     * @param attempt захваченная работа
+     * @param failure причина неуспеха попытки — текст исключения
+     * @param doNotRetry причина запрета повтора от процессора или {@code null}, если повтор не запрещён
      * @return {@code true}, если попытка была ещё открыта и закрыта этим вызовом
      */
-    boolean fail(final ClaimedAttempt attempt, final String reason, final boolean retryable) {
+    boolean fail(final ClaimedAttempt attempt, final String failure, final String doNotRetry) {
         return this.close(
                 attempt,
                 AttemptStatus.FAILED,
-                reason,
+                failure,
                 () -> this.retries.afterUnsuccessful(
                         this.jdbc,
                         new TaskRetries.Target(attempt.target(), attempt.taskType(), attempt.phase()),
-                        retryable,
-                        reason));
+                        doNotRetry == null,
+                        doNotRetry == null ? null : DO_NOT_RETRY + doNotRetry));
+    }
+
+    private void insertResult(final ClaimedAttempt attempt, final String result) {
+        if (result != null) {
+            this.jdbc
+                    .sql(INSERT_RESULT)
+                    .param("id", this.ids.next())
+                    .param(
+                            "executionCreatedAt",
+                            TaskSql.parameter(attempt.target().executionCreatedAt()))
+                    .param("attemptId", attempt.lease().attemptId())
+                    .param("level", attempt.target().level().name())
+                    .param("targetId", attempt.target().id())
+                    .param("result", result)
+                    .update();
+        }
     }
 
     private boolean close(

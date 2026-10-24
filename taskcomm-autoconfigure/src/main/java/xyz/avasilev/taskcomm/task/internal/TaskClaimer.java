@@ -15,6 +15,9 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
+import xyz.avasilev.taskcomm.execution.api.Origin;
+import xyz.avasilev.taskcomm.execution.api.OriginRelation;
+import xyz.avasilev.taskcomm.execution.api.OriginType;
 import xyz.avasilev.taskcomm.execution.internal.UuidV7;
 
 /**
@@ -48,7 +51,9 @@ public class TaskClaimer {
             expired AS (SELECT a.level, a.execution_created_at, a.target_id, NULL::uuid AS execution_id,
                     coalesce(t.task_type, b.task_type, u.task_type) AS task_type, a.phase, NULL::text AS contract_shape,
                     NULL::smallint AS priority, NULL::timestamptz AS next_attempt_at,
-                    NULL::timestamptz AS claim_order_at, NULL::text AS payload,
+                    NULL::timestamptz AS claim_order_at, NULL::text AS payload, NULL::timestamptz AS created_at,
+                    NULL::text AS origin_type, NULL::uuid AS origin_id, NULL::uuid AS origin_attempt_id,
+                    NULL::text AS origin_relation,
                     a.id AS attempt_id, a.locked_by, a.lease_renewals
                FROM tc_task_attempt a
                LEFT JOIN tc_task t ON a.level = 'TASK' AND t.execution_created_at >= :activeFrom
@@ -77,6 +82,13 @@ public class TaskClaimer {
             UNION ALL SELECT * FROM expired
             """;
 
+    /** Указатель на создателя есть только у задачи (docs/adr/0064-entity-origin-links.md). */
+    private static final String TASK_ORIGIN = "e.origin_type, e.origin_id, e.origin_attempt_id, e.origin_relation";
+
+    private static final String NO_ORIGIN =
+            "NULL::text AS origin_type, NULL::uuid AS origin_id, NULL::uuid AS origin_attempt_id, "
+                    + "NULL::text AS origin_relation";
+
     private static final String CLOSE_EXPIRED = """
             UPDATE tc_task_attempt
                SET status = 'LEASE_LOST', status_description = :reason, finished_at = now(), updated_at = now()
@@ -102,6 +114,21 @@ public class TaskClaimer {
                 locked_by, locked_until, lease_token, lease_renewals, started_at)
             VALUES (:id, now(), now(), :executionCreatedAt, :level, :targetId, :phase,
                     :lockedBy, now() + make_interval(secs => :lease), :leaseToken, 0, now())
+            """;
+
+    /**
+     * Попытки той же фазы: в текущем цикле повторов и за всю историю, считая только что
+     * вставленную.
+     */
+    private static final String ATTEMPT_HISTORY = """
+            SELECT count(*) FILTER (WHERE a.started_at >= e.retry_cycle_started_at) AS in_cycle,
+                   count(*) AS in_history
+              FROM tc_task_attempt a
+              JOIN {table} e ON e.execution_created_at = a.execution_created_at AND e.id = a.target_id
+             WHERE a.execution_created_at = :executionCreatedAt
+               AND a.level = :level
+               AND a.target_id = :targetId
+               AND a.phase = :phase
             """;
 
     private final JdbcClient jdbc;
@@ -221,8 +248,9 @@ public class TaskClaimer {
     }
 
     private void closeExpired(final Expired expired) {
-        final LeaseSettings lease =
-                this.settings.settings(expired.taskType(), expired.phase()).lease();
+        final LeaseSettings lease = this.settings
+                .settings(expired.taskType(), expired.entity().level(), expired.phase())
+                .lease();
         final String reason = expired.leaseRenewals() >= lease.maxRenewals()
                 ? "превышен предел обработки " + lease.maxExecutionTime()
                 : "аренда истекла: экземпляр " + expired.lockedBy() + " не продлил её";
@@ -256,10 +284,15 @@ public class TaskClaimer {
                 .param("contractShape", shape.name())
                 .param("phase", phase.name())
                 .update();
-        final LeaseSettings settings =
-                this.settings.settings(candidate.taskType(), phase).lease();
-        final AttemptLease lease =
-                new AttemptLease(this.ids.next(), UUID.randomUUID(), settings.duration(), settings.maxRenewals());
+        final LeaseSettings settings = this.settings
+                .settings(candidate.taskType(), entity.level(), phase)
+                .lease();
+        final AttemptLease lease = new AttemptLease(
+                this.ids.next(),
+                UUID.randomUUID(),
+                settings.duration(),
+                settings.heartbeatInterval(),
+                settings.maxRenewals());
         this.jdbc
                 .sql(INSERT_ATTEMPT)
                 .param("id", lease.attemptId())
@@ -272,13 +305,22 @@ public class TaskClaimer {
                 .param("leaseToken", lease.token())
                 .update();
         return new ClaimedAttempt(
-                lease,
-                entity,
-                candidate.executionId(),
-                candidate.taskType(),
-                phase,
-                candidate.key().priority(),
-                candidate.payload());
+                lease, entity, candidate.taskType(), phase, this.history(entity, phase), candidate.snapshot());
+    }
+
+    /**
+     * Номер только что вставленной попытки и признак повтора — из строк попыток той же фазы
+     * (docs/adr/0112-attempt-number-in-processing-context.md).
+     */
+    private AttemptHistory history(final TaskEntityRef entity, final TaskPhase phase) {
+        return this.jdbc
+                .sql(ATTEMPT_HISTORY.replace(TaskRetries.TABLE, entity.level().table()))
+                .param("executionCreatedAt", TaskSql.parameter(entity.executionCreatedAt()))
+                .param("level", entity.level().name())
+                .param("targetId", entity.id())
+                .param("phase", phase.name())
+                .query((rs, rowNum) -> new AttemptHistory(rs.getInt("in_cycle"), rs.getInt("in_history") > 1))
+                .single();
     }
 
     private static String candidates(
@@ -286,7 +328,7 @@ public class TaskClaimer {
         return """
                 %6$s AS (SELECT '%1$s' AS level, e.execution_created_at, e.id AS target_id, e.execution_id,
                         e.task_type, %2$s AS phase, %3$s AS contract_shape, e.priority, e.next_attempt_at,
-                        e.claim_order_at, e.payload::text AS payload,
+                        e.claim_order_at, e.payload::text AS payload, e.created_at, %7$s,
                         NULL::uuid AS attempt_id, NULL::text AS locked_by, NULL::integer AS lease_renewals
                    FROM %4$s e
                   WHERE e.status = 'PENDING'
@@ -307,7 +349,8 @@ public class TaskClaimer {
                         contractShape,
                         level.table(),
                         ordering.orderBy,
-                        level.name().toLowerCase(Locale.ROOT) + "_candidates");
+                        level.name().toLowerCase(Locale.ROOT) + "_candidates",
+                        level == TaskLevel.TASK ? TASK_ORIGIN : NO_ORIGIN);
     }
 
     private static Row row(final ResultSet rs, final int rowNum) throws SQLException {
@@ -330,7 +373,6 @@ public class TaskClaimer {
         final String shape = rs.getString("contract_shape");
         return new Candidate(
                 entity,
-                rs.getObject("execution_id", UUID.class),
                 rs.getString("task_type"),
                 taskPhase,
                 shape == null ? null : ContractShape.valueOf(shape),
@@ -338,7 +380,25 @@ public class TaskClaimer {
                         rs.getInt("priority"),
                         rs.getObject("next_attempt_at", OffsetDateTime.class).toInstant(),
                         rs.getObject("claim_order_at", OffsetDateTime.class).toInstant()),
-                rs.getString("payload"));
+                new ClaimedEntity(
+                        rs.getObject("execution_id", UUID.class),
+                        rs.getInt("priority"),
+                        rs.getObject("created_at", OffsetDateTime.class).toInstant(),
+                        origin(rs),
+                        rs.getString("payload")));
+    }
+
+    private static Origin origin(final ResultSet rs) throws SQLException {
+        final String type = rs.getString("origin_type");
+        if (type == null) {
+            return null;
+        }
+        final String relation = rs.getString("origin_relation");
+        return new Origin(
+                OriginType.valueOf(type),
+                rs.getObject("origin_id", UUID.class),
+                rs.getObject("origin_attempt_id", UUID.class),
+                OriginRelation.valueOf(relation));
     }
 
     /** Порядок, в котором выбирается готовая работа в этом такте. */
@@ -370,21 +430,19 @@ public class TaskClaimer {
      * Кандидат первой ветки — готовая сущность без открытой попытки.
      *
      * @param entity ключ строки сущности
-     * @param executionId дело
      * @param taskType тип задачи
      * @param phase фаза сущности; у задачи до первого захвата пусто
      * @param shape форма контракта задачи; пусто до первого захвата и у детей
      * @param key ключи порядка захвата
-     * @param payload нагрузка в JSON
+     * @param snapshot снимок сущности для воркера
      */
     private record Candidate(
             TaskEntityRef entity,
-            UUID executionId,
             String taskType,
             TaskPhase phase,
             ContractShape shape,
             OrderKey key,
-            String payload)
+            ClaimedEntity snapshot)
             implements Row {}
 
     /**
