@@ -146,7 +146,7 @@ xyz.avasilev.taskcomm          TaskcommException и его общие насле
 │                              доступный всем пакетам без связи между подсистемами
 ├── execution/
 │   ├── api/           публичный API: Execution, ExecutionRef, ExecutionService, Origin
-│   └── internal/      реализация, ExecutionRepository, держатель текущего дела
+│   └── internal/      реализация, ExecutionRepository, держатель текущего дела, генератор UUIDv7
 ├── task/
 │   ├── api/           публичный API: Task, TaskBatch, TaskUnit, TaskService, TaskSubmitOptions,
 │   │                  TaskProcessor и три его наследника, Emitter, SearchableField,
@@ -382,7 +382,8 @@ public sealed interface Communication<C> {
   - `internal` подсистемы используется только внутри неё и из `autoconfigure`, где бины
     собираются вручную;
   - `execution.internal` вдобавок доступен `task.internal` и `communication.internal` — ради общего
-    держателя текущего дела; это **единственное** исключение, расширять его молча нельзя;
+    держателя текущего дела и генератора UUIDv7 ([ADR 0114](docs/adr/0114-uuidv7-generator-in-execution-internal.md));
+    это **единственное** исключение, и список его оснований закрыт — расширять молча нельзя;
   - `api` не зависит от `internal`;
   - `task` и `communication` не зависят друг от друга;
   - `execution` не зависит ни от `task`, ни от `communication` — агрегат пассивен;

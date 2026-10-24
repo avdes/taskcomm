@@ -1,0 +1,154 @@
+package xyz.avasilev.taskcomm.task.internal;
+
+import java.time.Instant;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
+import javax.sql.DataSource;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
+
+/**
+ * Heartbeat экземпляра: продлевает аренды всех попыток, которые сейчас выполняет этот экземпляр,
+ * одним запросом на такт (docs/adr/0025-lease-mechanics.md). Продлевает не воркер, а отдельный
+ * поток: поток воркера занят синхронным кодом потребителя.
+ *
+ * <p>Продление трогает <b>только строки попыток</b>, сущность не обновляется вовсе, и
+ * {@code updated_at} попытки тоже не двигается: продление — не изменение состояния. Условие —
+ * токен и {@code finished_at IS NULL}, как у завершения. Предел обработки — счётчик продлений:
+ * дошли до предела — попытка больше не продлевается, аренда истекает, и попытку закрывает
+ * переподхват.
+ *
+ * <p>Попытка, которую продлить не удалось — закрыта переподхватом или дошла до предела, —
+ * из реестра уходит и считается потерянной: {@code shouldStop()} её контекста отвечает
+ * {@code true}, не спрашивая базу.
+ */
+class TaskHeartbeat {
+
+    private static final String RENEW = """
+            UPDATE tc_task_attempt a
+               SET locked_until = now() + make_interval(secs => l.lease),
+                   lease_renewals = a.lease_renewals + 1
+              FROM unnest(CAST(:executionCreatedAt AS timestamptz[]), CAST(:attemptId AS uuid[]),
+                          CAST(:leaseToken AS uuid[]), CAST(:maxRenewals AS integer[]),
+                          CAST(:lease AS double precision[]))
+                   AS l(execution_created_at, id, lease_token, max_renewals, lease)
+             WHERE a.execution_created_at >= :oldest
+               AND a.execution_created_at = l.execution_created_at
+               AND a.id = l.id
+               AND a.lease_token = l.lease_token
+               AND a.finished_at IS NULL
+               AND a.lease_renewals < l.max_renewals
+            RETURNING a.id
+            """;
+
+    private final JdbcClient jdbc;
+
+    private final TransactionTemplate transactions;
+
+    private final Map<UUID, ClaimedAttempt> active = new ConcurrentHashMap<>();
+
+    private final Set<UUID> lost = ConcurrentHashMap.newKeySet();
+
+    /**
+     * Собирает heartbeat.
+     *
+     * @param dataSource {@code DataSource} стартера
+     * @param transactionManager менеджер транзакций стартера
+     */
+    TaskHeartbeat(final DataSource dataSource, final PlatformTransactionManager transactionManager) {
+        this.jdbc = JdbcClient.create(dataSource);
+        this.transactions = new TransactionTemplate(transactionManager);
+        this.transactions.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        this.transactions.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+    }
+
+    /**
+     * Берёт попытку под продление — сразу после захвата.
+     *
+     * @param attempt захваченная работа
+     */
+    void track(final ClaimedAttempt attempt) {
+        this.lost.remove(attempt.lease().attemptId());
+        this.active.put(attempt.lease().attemptId(), attempt);
+    }
+
+    /**
+     * Снимает попытку с продления — после её закрытия, успешного или нет.
+     *
+     * @param attempt захваченная работа
+     */
+    void release(final ClaimedAttempt attempt) {
+        this.active.remove(attempt.lease().attemptId());
+        this.lost.remove(attempt.lease().attemptId());
+    }
+
+    /**
+     * Потеряна ли аренда попытки: последнее продление её не застало. Ответ из памяти.
+     *
+     * @param attempt захваченная работа
+     * @return {@code true}, если продлевать попытку больше нельзя
+     */
+    boolean isLost(final ClaimedAttempt attempt) {
+        return this.lost.contains(attempt.lease().attemptId());
+    }
+
+    /**
+     * Один такт: продлевает все попытки реестра одним запросом.
+     *
+     * @return попытки, которые продлить не удалось и которые сняты с продления
+     */
+    Set<UUID> renew() {
+        final List<ClaimedAttempt> attempts = List.copyOf(this.active.values());
+        if (attempts.isEmpty()) {
+            return Set.of();
+        }
+        final Instant oldest = attempts.stream()
+                .map(attempt -> attempt.target().executionCreatedAt())
+                .min(Comparator.naturalOrder())
+                .orElseThrow();
+        final List<UUID> renewed = this.transactions.execute(status -> {
+            TaskSql.forceCustomPlan(this.jdbc);
+            return this.jdbc
+                    .sql(RENEW)
+                    .param("oldest", TaskSql.parameter(oldest))
+                    .param(
+                            "executionCreatedAt",
+                            column(attempts, a -> TaskSql.parameter(a.target().executionCreatedAt())))
+                    .param("attemptId", column(attempts, a -> a.lease().attemptId()))
+                    .param("leaseToken", column(attempts, a -> a.lease().token()))
+                    .param("maxRenewals", column(attempts, a -> a.lease().maxRenewals()))
+                    .param(
+                            "lease",
+                            column(attempts, a -> TaskSql.seconds(a.lease().duration())))
+                    .query(UUID.class)
+                    .list();
+        });
+        final Set<UUID> notRenewed = new HashSet<>();
+        attempts.forEach(attempt -> notRenewed.add(attempt.lease().attemptId()));
+        if (renewed != null) {
+            renewed.forEach(notRenewed::remove);
+        }
+        notRenewed.forEach(id -> {
+            if (this.active.remove(id) != null) {
+                this.lost.add(id);
+            }
+        });
+        return Set.copyOf(notRenewed);
+    }
+
+    /**
+     * Столбец значений для {@code unnest}: массив строк, который запрос приводит к нужному типу.
+     * Драйвер передаёт {@code String[]} как {@code text[]} без помощи Spring.
+     */
+    private static String[] column(final List<ClaimedAttempt> attempts, final Function<ClaimedAttempt, ?> value) {
+        return attempts.stream().map(value).map(String::valueOf).toArray(String[]::new);
+    }
+}

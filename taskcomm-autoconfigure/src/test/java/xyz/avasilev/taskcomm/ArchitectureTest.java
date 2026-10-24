@@ -18,8 +18,8 @@ import org.springframework.stereotype.Service;
  *   <li>{@code internal} подсистемы используется только внутри неё и из {@code autoconfigure},
  *       где бины собираются вручную (docs/adr/0002-autoconfiguration-registration.md);
  *   <li>{@code execution.internal} вдобавок доступен внутренним пакетам обоих движков — ради
- *       общего держателя текущего дела (docs/adr/0056-execution-ref.md); это единственное
- *       исключение;
+ *       общего держателя текущего дела (docs/adr/0056-execution-ref.md) и генератора UUIDv7
+ *       (docs/adr/0114-uuidv7-generator-in-execution-internal.md); это единственное исключение;
  *   <li>{@code api} не зависит от {@code internal};
  *   <li>задачи и коммуникации не зависят друг от друга (docs/adr/0010-separate-engines.md);
  *   <li>{@code execution} не зависит ни от задач, ни от коммуникаций — агрегат пассивен

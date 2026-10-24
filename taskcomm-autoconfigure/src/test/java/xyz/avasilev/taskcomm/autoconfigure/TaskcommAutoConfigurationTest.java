@@ -52,6 +52,32 @@ class TaskcommAutoConfigurationTest {
     }
 
     @Test
+    void bindsTaskPollLeaseRetryAndDedicatedPollers() {
+        this.contextRunner
+                .withPropertyValues(
+                        "taskcomm.task.poll.claim-order=quota",
+                        "taskcomm.task.poll.fifo-share=0.25",
+                        "taskcomm.task.lease.heartbeat-interval=10s",
+                        "taskcomm.task.retry.max-attempts=5",
+                        "taskcomm.task.pollers.urgent.types=order-urgent",
+                        "taskcomm.task.pollers.urgent.claim-order=priority")
+                .run(context -> {
+                    final TaskcommProperties.Task task =
+                            context.getBean(TaskcommProperties.class).getTask();
+                    assertThat(task.getPoll().getClaimOrder()).isEqualTo(ClaimOrder.QUOTA);
+                    assertThat(task.getPoll().getFifoShare()).isEqualTo(0.25);
+                    assertThat(task.getPoll().getDeadlineStep()).isEqualTo(Duration.ofMinutes(1));
+                    assertThat(task.getLease().getHeartbeatInterval()).isEqualTo(Duration.ofSeconds(10));
+                    assertThat(task.getRetry().getMaxAttempts()).isEqualTo(5);
+                    assertThat(task.getRetry().getJitter()).isEqualTo(0.2);
+                    final TaskcommProperties.Poller urgent = task.getPollers().get("urgent");
+                    assertThat(urgent.getTypes()).containsExactly("order-urgent");
+                    assertThat(urgent.getClaimOrder()).isEqualTo(ClaimOrder.PRIORITY);
+                    assertThat(urgent.getWorkers()).isNull();
+                });
+    }
+
+    @Test
     void backsOffWhenDisabledByProperty() {
         this.contextRunner
                 .withPropertyValues("taskcomm.enabled=false")

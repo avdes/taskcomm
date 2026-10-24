@@ -17,7 +17,8 @@ taskcomm:
   task:
     enabled: true
     poll: { interval: 1s, batch-size: 100, workers: 8,
-            claim-order: deadline, deadline-step: 1m }   # deadline | priority | quota
+            claim-order: deadline, deadline-step: 1m,   # deadline | priority | quota
+            fifo-share: 0.1 }               # доля FIFO у quota, строго между 0 и 1
     lease: { duration: 60s, heartbeat-interval: 20s, max-execution-time: 30m }
     retry: { max-attempts: 3, initial-delay: 5s, multiplier: 2.0, max-delay: 1h, jitter: 0.2 }
     types:                          # ключ — taskType
@@ -28,7 +29,7 @@ taskcomm:
         phases:                     # PROCESS | EXPAND | COLLECT
           expand:
             lease: { max-execution-time: 2h }
-    pollers:                        # дополнительные к основному
+    pollers:                        # дополнительные к основному; не заданное берётся у основного
       urgent: { types: [order-urgent], workers: 4, claim-order: priority }
   communication:
     enabled: true
@@ -146,7 +147,8 @@ taskcomm:
 значению `duration` после разрешения по пяти уровням, то есть по каждому типу или системе и фазе;
 сообщение называет тип, фазу, уровень и рекомендуемый интервал
 ([ADR 0103](../adr/0103-heartbeat-not-shorter-than-lease-fails.md)); `priority <= 0`; приоритет в аннотации на методе или
-в `yaml` на уровне фазы ([ADR 0084](../adr/0084-priority-only-per-type.md)); один тип задачи назван в двух поллерах.
+в `yaml` на уровне фазы ([ADR 0084](../adr/0084-priority-only-per-type.md)); один тип задачи назван в двух поллерах; `fifo-share`
+вне `(0, 1)` ([ADR 0115](../adr/0115-quota-fifo-share-by-lottery.md)).
 У размыкателя ([ADR 0065](../adr/0065-communication-circuit-breaker.md)): `failure-rate-threshold`
 вне `(0, 1]`; `minimum-calls < 1`; `probe.calls < 1`; `window` не положительное; для `wait` — те же
 правила, что для `retry`, включая запрет нулевого джиттера. `response-timeout` не положительный

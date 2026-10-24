@@ -10,9 +10,14 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicInteger;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.beans.factory.support.AbstractBeanDefinition;
+import org.springframework.beans.factory.support.AutowireCandidateQualifier;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.jdbc.autoconfigure.DataSourceInitializationAutoConfiguration;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
@@ -22,6 +27,8 @@ import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.TransactionStatus;
 import xyz.avasilev.taskcomm.TaskcommConfigurationException;
 import xyz.avasilev.taskcomm.TestPostgres;
 import xyz.avasilev.taskcomm.schema.internal.PartitionMaintenance;
@@ -34,6 +41,7 @@ import xyz.avasilev.taskcomm.schema.internal.SchemaStartup;
  * у схемы нет, docs/adr/0107), точка замены {@code @TaskcommScheduler}, отсутствие бинов чужих
  * типов, выбор {@code DataSource} и менеджера транзакций (docs/adr/0094, docs/adr/0096).
  */
+@ExtendWith(OutputCaptureExtension.class)
 class TaskcommSchemaAutoConfigurationIT {
 
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
@@ -207,6 +215,81 @@ class TaskcommSchemaAutoConfigurationIT {
                         .hasMessageContaining("работает не с тем DataSource"));
     }
 
+    @Test
+    void usesPrimaryDataSourceWhenNoneIsMarked() {
+        final String primary = TestPostgres.newSchema();
+        final String other = TestPostgres.newSchema();
+        final DataSource primaryDataSource = TestPostgres.dataSource(primary);
+        this.contextRunner
+                .withBean("primary", DataSource.class, () -> primaryDataSource, bean -> bean.setPrimary(true))
+                .withBean("other", DataSource.class, () -> TestPostgres.dataSource(other))
+                .withBean(PlatformTransactionManager.class, () -> new DataSourceTransactionManager(primaryDataSource))
+                .withPropertyValues("taskcomm.schema.initialize=always")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(tableCount(primary)).isPositive();
+                    assertThat(tableCount(other)).isZero();
+                });
+    }
+
+    @Test
+    void failsWhenThereIsNoDataSource() {
+        this.contextRunner.run(context -> assertThat(context)
+                .getFailure()
+                .rootCause()
+                .isInstanceOf(TaskcommConfigurationException.class)
+                .hasMessageContaining("нет ни одного"));
+    }
+
+    @Test
+    void usesTransactionManagerMarkedWithQualifier() {
+        final String schema = TestPostgres.newSchema();
+        final DataSource dataSource = TestPostgres.dataSource(schema);
+        this.contextRunner
+                .withBean(DataSource.class, () -> dataSource)
+                .withBean(
+                        "foreign",
+                        PlatformTransactionManager.class,
+                        () -> new DataSourceTransactionManager(TestPostgres.dataSource(schema)))
+                .withBean(
+                        "marked",
+                        PlatformTransactionManager.class,
+                        () -> new DataSourceTransactionManager(dataSource),
+                        bean -> ((AbstractBeanDefinition) bean)
+                                .addQualifier(new AutowireCandidateQualifier(TaskcommTransactionManager.class)))
+                .withPropertyValues("taskcomm.schema.initialize=always")
+                .run(context -> assertThat(context).hasNotFailed());
+    }
+
+    @Test
+    void failsWhenTransactionManagerIsAmbiguous() {
+        final DataSource dataSource = TestPostgres.dataSource(TestPostgres.newSchema());
+        this.contextRunner
+                .withBean(DataSource.class, () -> dataSource)
+                .withBean("first", PlatformTransactionManager.class, () -> new DataSourceTransactionManager(dataSource))
+                .withBean(
+                        "second", PlatformTransactionManager.class, () -> new DataSourceTransactionManager(dataSource))
+                .run(context -> assertThat(context)
+                        .getFailure()
+                        .rootCause()
+                        .isInstanceOf(TaskcommConfigurationException.class)
+                        .hasMessageContaining("[first, second]")
+                        .hasMessageContaining("@TaskcommTransactionManager или @Primary"));
+    }
+
+    @Test
+    void warnsWhenTransactionManagerHidesItsDataSource(final CapturedOutput output) {
+        final DataSource dataSource = TestPostgres.dataSource(TestPostgres.newSchema());
+        this.contextRunner
+                .withBean(DataSource.class, () -> dataSource)
+                .withBean(PlatformTransactionManager.class, () -> new JtaLikeTransactionManager(dataSource))
+                .withPropertyValues("taskcomm.schema.initialize=always")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(output).contains("не виден DataSource");
+                });
+    }
+
     private static int partitionCount(final String schema) {
         return JdbcClient.create(TestPostgres.dataSource(schema))
                 .sql("SELECT count(*) FROM pg_inherits i JOIN pg_class c ON c.oid = i.inhrelid"
@@ -220,6 +303,34 @@ class TaskcommSchemaAutoConfigurationIT {
                 .sql("SELECT count(*) FROM pg_tables WHERE schemaname = current_schema()")
                 .query(Integer.class)
                 .single();
+    }
+
+    /**
+     * Менеджер, у которого {@code DataSource} не виден, — как у JTA. Транзакции ведёт настоящий
+     * менеджер внутри, но наружу свойства {@code dataSource} нет.
+     */
+    static class JtaLikeTransactionManager implements PlatformTransactionManager {
+
+        private final DataSourceTransactionManager delegate;
+
+        JtaLikeTransactionManager(final DataSource dataSource) {
+            this.delegate = new DataSourceTransactionManager(dataSource);
+        }
+
+        @Override
+        public TransactionStatus getTransaction(final TransactionDefinition definition) {
+            return this.delegate.getTransaction(definition);
+        }
+
+        @Override
+        public void commit(final TransactionStatus status) {
+            this.delegate.commit(status);
+        }
+
+        @Override
+        public void rollback(final TransactionStatus status) {
+            this.delegate.rollback(status);
+        }
     }
 
     /** {@code DataSource} на схему из бина {@code String} и менеджер транзакций на нём. */

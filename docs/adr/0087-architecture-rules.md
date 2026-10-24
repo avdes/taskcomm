@@ -5,6 +5,8 @@
 - **Изменено:** [0107](0107-schema-internal-package.md) — появился пакет `schema.internal`:
   используется только из `schema..` и `autoconfigure..`, сам не зависит ни от подсистем,
   ни от `execution..`.
+- **Изменено:** [0114](0114-uuidv7-generator-in-execution-internal.md) — исключение для
+  `execution.internal` существует ради двух вещей: держателя текущего дела и генератора UUIDv7.
 
 ## Контекст
 
