@@ -152,7 +152,8 @@ xyz.avasilev.taskcomm          TaskcommException и его общие насле
 │   │                  TaskProcessor и три его наследника, Emitter, SearchableField,
 │   │                  @TaskProcessorSettings и сокращения, контекст обработки (skip(reason),
 │   │                  doNotRetry(reason), shouldStop(), executionRef(), attemptNumber(), isRetry())
-│   └── internal/      реализация: сервисы, TaskRepository и его JDBC-реализация, поллер, retry
+│   └── internal/      реализация: сервисы, хранилище по обязанностям (создание, захват,
+│                      закрытие попытки, heartbeat — ADR 0117), поллер, retry
 ├── communication/
 │   ├── api/           публичный API: Communication, CommunicationService, значения-запросы приёма,
 │   │                  CommunicationProcessor и его транспортные наследники, CommunicationContext,

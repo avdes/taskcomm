@@ -6,8 +6,9 @@
 ## Персистентность и конкурентность
 
 - **Публичного SPI хранилища нет** ([ADR 0089](../adr/0089-no-storage-spi-explicit-extension-points.md)):
-  `TaskRepository`, `CommunicationRepository`, `ExecutionRepository` и их реализации на Spring JDBC
-  + PostgreSQL живут в `internal`. В SPI вошла бы вся механика — захват, аренда, партиции,
+  хранилища задач, коммуникаций и дел на Spring JDBC + PostgreSQL живут в `internal`. Хранилище
+  задач — классы по обязанностям без интерфейса: создание, захват, закрытие попытки, heartbeat
+  ([ADR 0117](../adr/0117-task-storage-classes-by-responsibility.md)); у дела — `ExecutionRepository`. В SPI вошла бы вся механика — захват, аренда, партиции,
   дедупликация, — и он заморозился бы на 2.0.0 при единственной реализации. Понадобится вторая —
   тогда SPI проектируется по двум примерам. **In-memory реализации нет и не будет**: в памяти нет
   партиций, `SKIP LOCKED` и advisory-блокировок, а тесты идут на Testcontainers.

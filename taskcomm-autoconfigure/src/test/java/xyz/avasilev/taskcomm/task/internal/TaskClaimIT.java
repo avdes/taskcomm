@@ -168,6 +168,29 @@ class TaskClaimIT {
     }
 
     @Test
+    void attemptLimitCountsOnlyAttemptsOfTheSamePhase() throws Exception {
+        final CreatedTask task = this.db.submit("order-sync", 100);
+        this.db.jdbc.sql("""
+                        UPDATE tc_task SET contract_shape = 'UNIT', phase = 'COLLECT' WHERE id = :id;
+                        INSERT INTO tc_task_attempt (id, created_at, updated_at, execution_created_at, level, target_id,
+                                                     phase, locked_by, locked_until, lease_token, started_at,
+                                                     finished_at, status)
+                        SELECT gen_random_uuid(), now(), now(), execution_created_at, 'TASK', id, 'EXPAND',
+                               'worker-a', now(), gen_random_uuid(), now(), now(), 'SUCCEEDED'
+                          FROM tc_task WHERE id = :id
+                        """).param("id", task.id()).update();
+        final AttemptSettings settings = TaskTestSettings.settings(2, Duration.ZERO, Duration.ofSeconds(1));
+        final TaskClaimer claimer = this.db.claimer("worker-a", settings, () -> 0.5);
+        final Map<String, ContractShape> unit = Map.of("order-sync", ContractShape.UNIT);
+        assertThat(claimer.claim(DEADLINE, unit, 1).getFirst().phase()).isEqualTo(TaskPhase.COLLECT);
+        Thread.sleep(1_200);
+
+        claimer.claim(DEADLINE, unit, 1);
+
+        assertThat(this.db.status(TaskLevel.TASK, task.id())).isEqualTo("PENDING");
+    }
+
+    @Test
     void failedAttemptRetriesOrFailsWhenRetryIsForbidden() {
         final CreatedTask retried = this.db.submit(TaskTestDatabase.FLAT_TYPE, 100);
         final CreatedTask forbidden = this.db.submit(TaskTestDatabase.FLAT_TYPE, 100);

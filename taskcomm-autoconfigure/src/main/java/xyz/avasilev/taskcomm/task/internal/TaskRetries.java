@@ -11,9 +11,10 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * (docs/adr/0067-expired-lease-closes-attempt.md). Сущность возвращается в {@code PENDING}
  * с backoff или, если лимит исчерпан, становится {@code FAILED}.
  *
- * <p>Попытки в лимите считаются по строкам попыток сущности начиная
- * с {@code retry_cycle_started_at} (docs/adr/0043-manual-restart-resets-attempts.md); лимит
- * берётся из настроек фазы закрытой попытки.
+ * <p>Лимит — свой у каждой фазы (docs/adr/0116-attempt-limit-per-phase.md): попытки считаются
+ * по строкам попыток той же фазы начиная с {@code retry_cycle_started_at} сущности
+ * (docs/adr/0043-manual-restart-resets-attempts.md), и успешное раскрытие не съедает попыток
+ * сборки.
  *
  * <p>{@code claim_order_at} пересчитывается в том же выражении, что {@code next_attempt_at},
  * по шагу дедлайна поллера этого типа (docs/adr/0063-claim-ordering-and-pollers.md). Методы
@@ -37,6 +38,7 @@ class TaskRetries {
              WHERE a.execution_created_at = :executionCreatedAt
                AND a.level = :level
                AND a.target_id = :targetId
+               AND a.phase = :phase
                AND a.started_at >= (SELECT e.retry_cycle_started_at FROM {table} e
                                      WHERE e.execution_created_at = :executionCreatedAt AND e.id = :targetId)
             """;
@@ -91,6 +93,7 @@ class TaskRetries {
                 .param("executionCreatedAt", TaskSql.parameter(entity.executionCreatedAt()))
                 .param("level", entity.level().name())
                 .param("targetId", entity.id())
+                .param("phase", target.phase().name())
                 .query(Integer.class)
                 .single();
     }
