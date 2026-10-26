@@ -201,6 +201,13 @@ gradlew.bat publishToMavenLocal
 
 Локальная публикация для отладки в приложении-потребителе.
 
+```powershell
+gradlew.bat loadTest
+```
+
+Нагрузочные сценарии — вне `check`, долго, нужен Docker. Запускать перед закрытием этапа
+и после правок захвата.
+
 В CI и на Linux те же задачи запускаются как `./gradlew build`.
 
 ## Правила стартера
@@ -368,6 +375,8 @@ public sealed interface Communication<C> {
 - `*Test` — unit-тесты, `*IT` — интеграционные. Разделение — по имени класса: задача `test`
   запускает только `*Test`, задача `integrationTest` — только `*IT`, и она входит в `check`
   ([ADR 0108](docs/adr/0108-integration-test-task.md)). Класс с другим именем не запустит ни одна.
+  Третье имя — `*LoadScenario`: нагрузочные сценарии, их запускает только задача `loadTest`,
+  вне `check` ([ADR 0128](docs/adr/0128-claim-load-scenario.md)).
 - **Интеграционные тесты — только на PostgreSQL в Testcontainers**
   ([ADR 0085](docs/adr/0085-tests-on-real-postgres.md)). H2 и другие встроенные базы не годятся:
   нет партиционирования с `ATTACH`, `jsonb`, `SKIP LOCKED` в семантике PostgreSQL, advisory-блокировок.

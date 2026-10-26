@@ -1,6 +1,7 @@
 package xyz.avasilev.taskcomm.task.internal;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -309,6 +310,84 @@ class TaskClaimIT {
         assertThat(this.db.count("SELECT count(*) FROM tc_task_result", null)).isZero();
     }
 
+    /**
+     * Попытки такта открываются пачкой: сущности разных уровней помечаются каждая в своей таблице,
+     * форма контракта пишется только при первом захвате, а номер попытки и признак повтора у каждой
+     * свои (docs/adr/0112-attempt-number-in-processing-context.md).
+     */
+    @Test
+    void oneTickOpensAttemptsOfMixedLevelsWithTheirOwnHistory() {
+        final CreatedTask fresh = this.db.submit(TaskTestDatabase.FLAT_TYPE, 100);
+        final CreatedTask retried = this.db.submit(TaskTestDatabase.FLAT_TYPE, 100);
+        final CreatedTask restarted = this.db.submit(TaskTestDatabase.FLAT_TYPE, 100);
+        final CreatedTask firstClaim = this.db.submit("order-sync", 100);
+        final CreatedTask parent = this.db.submit("order-sync", 100);
+        this.failedAttempt(retried.id());
+        this.db
+                .jdbc
+                .sql("UPDATE tc_task SET retry_cycle_started_at = now() - interval '2 minutes' WHERE id = :id")
+                .param("id", retried.id())
+                .update();
+        this.failedAttempt(restarted.id());
+        final UUID unit = this.db.ids.next();
+        this.db
+                .jdbc
+                .sql("""
+                        UPDATE tc_task SET status = 'AWAITING_CHILDREN', contract_shape = 'UNIT', phase = 'COLLECT'
+                         WHERE id = :taskId;
+                        INSERT INTO tc_task_unit (id, created_at, updated_at, execution_id, execution_created_at,
+                                                  task_id, parent_attempt_id, task_type, payload, status, priority,
+                                                  next_attempt_at, claim_order_at, retry_cycle_started_at)
+                        VALUES (:id, now(), now(), :executionId, :executionCreatedAt, :taskId, gen_random_uuid(),
+                                'order-sync', '{}', 'PENDING', 100, now(), now(), now())
+                        """)
+                .param("id", unit)
+                .param("executionId", parent.execution().id())
+                .param(
+                        "executionCreatedAt",
+                        TaskSql.parameter(parent.execution().createdAt()))
+                .param("taskId", parent.id())
+                .update();
+        final AttemptSettings settings = TaskTestSettings.settings(3, Duration.ZERO, Duration.ofMinutes(1));
+
+        final List<ClaimedAttempt> claimed = this.db
+                .claimer("worker-a", settings, () -> 0.5)
+                .claim(
+                        DEADLINE,
+                        Map.of(TaskTestDatabase.FLAT_TYPE, ContractShape.FLAT, "order-sync", ContractShape.UNIT),
+                        10);
+
+        assertThat(claimed)
+                .extracting(attempt -> attempt.target().id(), ClaimedAttempt::history)
+                .containsExactlyInAnyOrder(
+                        tuple(fresh.id(), new AttemptHistory(1, false)),
+                        tuple(retried.id(), new AttemptHistory(2, true)),
+                        tuple(restarted.id(), new AttemptHistory(1, true)),
+                        tuple(firstClaim.id(), new AttemptHistory(1, false)),
+                        tuple(unit, new AttemptHistory(1, false)));
+        assertThat(this.db.count("SELECT count(*) FROM tc_task WHERE status = 'RUNNING'", null))
+                .isEqualTo(4);
+        assertThat(this.db.status(TaskLevel.UNIT, unit)).isEqualTo("RUNNING");
+        assertThat(this.db.status(TaskLevel.TASK, parent.id())).isEqualTo("AWAITING_CHILDREN");
+        assertThat(this.db.count(
+                        "SELECT count(*) FROM tc_task WHERE id = :id AND contract_shape = 'UNIT' AND phase = 'EXPAND'",
+                        firstClaim.id()))
+                .isEqualTo(1);
+        assertThat(this.db.count(
+                        "SELECT count(*) FROM tc_task WHERE id = :id AND contract_shape = 'UNIT' AND phase = 'COLLECT'",
+                        parent.id()))
+                .isEqualTo(1);
+        assertThat(this.db.count(
+                        "SELECT count(*) FROM tc_task WHERE task_type = 'report' AND contract_shape = 'FLAT'"
+                                + " AND phase = 'PROCESS'",
+                        null))
+                .isEqualTo(3);
+        assertThat(claimed)
+                .allSatisfy(attempt -> assertThat(
+                                this.attempt(attempt.lease().attemptId()).get("locked_by"))
+                        .isEqualTo("worker-a"));
+    }
+
     @Test
     void claimFormsOrderReadyWorkDifferently() throws Exception {
         final CreatedTask older = this.db.submit(TaskTestDatabase.FLAT_TYPE, 100);
@@ -331,6 +410,18 @@ class TaskClaimIT {
         this.db.jdbc.sql("DELETE FROM tc_task_attempt").update();
         this.db.jdbc.sql("UPDATE tc_task SET status = 'PENDING'").update();
         return attempt.target().id();
+    }
+
+    /** Закрытая упавшая попытка минуту назад — раньше начала цикла повторов, заведённого при постановке. */
+    private void failedAttempt(final UUID task) {
+        this.db.jdbc.sql("""
+                        INSERT INTO tc_task_attempt (id, created_at, updated_at, execution_created_at, level, target_id,
+                                                     phase, locked_by, locked_until, lease_token, started_at,
+                                                     finished_at, status)
+                        SELECT gen_random_uuid(), now(), now(), execution_created_at, 'TASK', id, 'PROCESS',
+                               'worker-a', now(), gen_random_uuid(), now() - interval '1 minute', now(), 'FAILED'
+                          FROM tc_task WHERE id = :id
+                        """).param("id", task).update();
     }
 
     private Map<String, Object> attempt(final UUID id) {

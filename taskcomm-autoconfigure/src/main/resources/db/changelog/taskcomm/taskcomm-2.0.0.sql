@@ -61,11 +61,11 @@ CREATE TABLE IF NOT EXISTS tc_task (
         AND (origin_attempt_id IS NULL OR origin_type IS NOT NULL))
 ) PARTITION BY RANGE (execution_created_at);
 
-CREATE INDEX IF NOT EXISTS tc_task_claim_deadline_idx ON tc_task (status, claim_order_at)
+CREATE INDEX IF NOT EXISTS tc_task_claim_deadline_idx ON tc_task (status, task_type, claim_order_at)
     WHERE status IN ('PENDING', 'RUNNING', 'AWAITING_CHILDREN');
-CREATE INDEX IF NOT EXISTS tc_task_claim_priority_idx ON tc_task (status, priority, next_attempt_at)
+CREATE INDEX IF NOT EXISTS tc_task_claim_priority_idx ON tc_task (status, task_type, priority, next_attempt_at)
     WHERE status IN ('PENDING', 'RUNNING', 'AWAITING_CHILDREN');
-CREATE INDEX IF NOT EXISTS tc_task_claim_fifo_idx ON tc_task (status, next_attempt_at)
+CREATE INDEX IF NOT EXISTS tc_task_claim_fifo_idx ON tc_task (status, task_type, next_attempt_at)
     WHERE status IN ('PENDING', 'RUNNING', 'AWAITING_CHILDREN');
 CREATE INDEX IF NOT EXISTS tc_task_execution_idx ON tc_task (execution_id);
 CREATE INDEX IF NOT EXISTS tc_task_results_discard_idx ON tc_task (updated_at)
@@ -122,11 +122,11 @@ CREATE TABLE IF NOT EXISTS tc_task_batch (
     CONSTRAINT tc_task_batch_priority_check CHECK (priority > 0)
 ) PARTITION BY RANGE (execution_created_at);
 
-CREATE INDEX IF NOT EXISTS tc_task_batch_claim_deadline_idx ON tc_task_batch (status, claim_order_at)
+CREATE INDEX IF NOT EXISTS tc_task_batch_claim_deadline_idx ON tc_task_batch (status, task_type, claim_order_at)
     WHERE status IN ('PENDING', 'RUNNING', 'AWAITING_CHILDREN');
-CREATE INDEX IF NOT EXISTS tc_task_batch_claim_priority_idx ON tc_task_batch (status, priority, next_attempt_at)
+CREATE INDEX IF NOT EXISTS tc_task_batch_claim_priority_idx ON tc_task_batch (status, task_type, priority, next_attempt_at)
     WHERE status IN ('PENDING', 'RUNNING', 'AWAITING_CHILDREN');
-CREATE INDEX IF NOT EXISTS tc_task_batch_claim_fifo_idx ON tc_task_batch (status, next_attempt_at)
+CREATE INDEX IF NOT EXISTS tc_task_batch_claim_fifo_idx ON tc_task_batch (status, task_type, next_attempt_at)
     WHERE status IN ('PENDING', 'RUNNING', 'AWAITING_CHILDREN');
 CREATE INDEX IF NOT EXISTS tc_task_batch_awaiting_parent_idx ON tc_task_batch (parent_attempt_id)
     WHERE status = 'AWAITING_PARENT';
@@ -181,11 +181,11 @@ CREATE TABLE IF NOT EXISTS tc_task_unit (
     CONSTRAINT tc_task_unit_priority_check CHECK (priority > 0)
 ) PARTITION BY RANGE (execution_created_at);
 
-CREATE INDEX IF NOT EXISTS tc_task_unit_claim_deadline_idx ON tc_task_unit (status, claim_order_at)
+CREATE INDEX IF NOT EXISTS tc_task_unit_claim_deadline_idx ON tc_task_unit (status, task_type, claim_order_at)
     WHERE status IN ('PENDING', 'RUNNING');
-CREATE INDEX IF NOT EXISTS tc_task_unit_claim_priority_idx ON tc_task_unit (status, priority, next_attempt_at)
+CREATE INDEX IF NOT EXISTS tc_task_unit_claim_priority_idx ON tc_task_unit (status, task_type, priority, next_attempt_at)
     WHERE status IN ('PENDING', 'RUNNING');
-CREATE INDEX IF NOT EXISTS tc_task_unit_claim_fifo_idx ON tc_task_unit (status, next_attempt_at)
+CREATE INDEX IF NOT EXISTS tc_task_unit_claim_fifo_idx ON tc_task_unit (status, task_type, next_attempt_at)
     WHERE status IN ('PENDING', 'RUNNING');
 CREATE INDEX IF NOT EXISTS tc_task_unit_awaiting_parent_idx ON tc_task_unit (parent_attempt_id)
     WHERE status = 'AWAITING_PARENT';

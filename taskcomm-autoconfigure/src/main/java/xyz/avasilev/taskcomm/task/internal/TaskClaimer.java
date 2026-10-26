@@ -26,10 +26,14 @@ import xyz.avasilev.taskcomm.execution.internal.UuidV7;
  *
  * <ul>
  *   <li><b>Первая выдаёт работу</b>: задачи, группы и подзадачи в {@code PENDING}, готовые
- *       по {@code next_attempt_at}, без открытой попытки; ведёт частичный индекс формы захвата.
- *       Сущность становится {@code RUNNING}, для неё <b>вставляется</b> строка попытки с новым
- *       токеном и {@code locked_until = now() + аренда}. Двух открытых попыток у сущности не даст
- *       уникальный частичный индекс.
+ *       по {@code next_attempt_at}, без открытой попытки. Каждый тип поллера спрашивается своей
+ *       пробой по частичному индексу формы захвата с типом на втором месте, и блокирует тип только
+ *       свою долю (docs/adr/0129-claim-by-type-share-locking.md): сначала головы типов читаются
+ *       без блокировок и сливаются в порядке захвата, затем каждый тип со {@code SKIP LOCKED}
+ *       блокирует столько строк, сколько у него в слитой голове. Чужие и осиротевшие типы
+ *       не читаются. Сущность становится {@code RUNNING}, для неё <b>вставляется</b> строка
+ *       попытки с новым токеном и {@code locked_until = now() + аренда}. Двух открытых попыток
+ *       у сущности не даст уникальный частичный индекс.
  *   <li><b>Вторая работу не выдаёт</b>: открытые попытки с истёкшей арендой закрываются исходом
  *       {@code LEASE_LOST}, сущность возвращается в очередь с backoff или становится
  *       {@code FAILED}. Брошенная работа вернётся через первую ветку, когда наступит её
@@ -43,59 +47,7 @@ import xyz.avasilev.taskcomm.execution.internal.UuidV7;
  */
 public class TaskClaimer {
 
-    private static final String EXPIRED = """
-            expired AS (SELECT a.level, a.execution_created_at, a.target_id, NULL::uuid AS execution_id,
-                    coalesce(t.task_type, b.task_type, u.task_type) AS task_type, a.phase, NULL::text AS contract_shape,
-                    NULL::smallint AS priority, NULL::timestamptz AS next_attempt_at,
-                    NULL::timestamptz AS claim_order_at, NULL::text AS payload, NULL::timestamptz AS created_at,
-                    NULL::text AS origin_type, NULL::uuid AS origin_id, NULL::uuid AS origin_attempt_id,
-                    NULL::text AS origin_relation,
-                    coalesce(b.task_id, u.task_id) AS parent_task_id, u.batch_id AS parent_batch_id,
-                    coalesce(b.parent_attempt_id, u.parent_attempt_id) AS parent_attempt_id,
-                    a.id AS attempt_id, a.locked_by, a.lease_renewals
-               FROM tc_task_attempt a
-               LEFT JOIN tc_task t ON a.level = 'TASK' AND t.execution_created_at >= :activeFrom
-                    AND t.execution_created_at = a.execution_created_at AND t.id = a.target_id
-               LEFT JOIN tc_task_batch b ON a.level = 'BATCH' AND b.execution_created_at >= :activeFrom
-                    AND b.execution_created_at = a.execution_created_at AND b.id = a.target_id
-               LEFT JOIN tc_task_unit u ON a.level = 'UNIT' AND u.execution_created_at >= :activeFrom
-                    AND u.execution_created_at = a.execution_created_at AND u.id = a.target_id
-              WHERE a.finished_at IS NULL
-                AND a.locked_until < now()
-                AND a.execution_created_at >= :activeFrom
-              ORDER BY a.locked_until
-              LIMIT :expiredLimit
-                FOR UPDATE OF a SKIP LOCKED)
-            """;
-
-    /**
-     * Сами ветки — выборки из CTE: блокировать строки ({@code FOR UPDATE}) ветка {@code UNION ALL}
-     * в PostgreSQL не может, а CTE может.
-     */
-    private static final String BRANCHES = """
-
-            SELECT * FROM tc_task_candidates
-            UNION ALL SELECT * FROM tc_task_batch_candidates
-            UNION ALL SELECT * FROM tc_task_unit_candidates
-            UNION ALL SELECT * FROM expired
-            """;
-
-    /** Указатель на создателя есть только у задачи (docs/adr/0064-entity-origin-links.md). */
-    private static final String TASK_ORIGIN = "e.origin_type, e.origin_id, e.origin_attempt_id, e.origin_relation";
-
-    private static final String NO_ORIGIN =
-            "NULL::text AS origin_type, NULL::uuid AS origin_id, NULL::uuid AS origin_attempt_id, "
-                    + "NULL::text AS origin_relation";
-
-    /** Родство детей раскрытия (docs/adr/0047-children-belong-to-attempt.md); у задачи его нет. */
-    private static final String NO_PARENT =
-            "NULL::uuid AS parent_task_id, NULL::uuid AS parent_batch_id, NULL::uuid AS parent_attempt_id";
-
-    private static final String BATCH_PARENT =
-            "e.task_id AS parent_task_id, NULL::uuid AS parent_batch_id, e.parent_attempt_id";
-
-    private static final String UNIT_PARENT =
-            "e.task_id AS parent_task_id, e.batch_id AS parent_batch_id, e.parent_attempt_id";
+    private final TaskClaimQuery query = new TaskClaimQuery();
 
     private final JdbcClient jdbc;
 
@@ -153,12 +105,13 @@ public class TaskClaimer {
         return tick.claimed();
     }
 
-    /** Тело транзакции такта: брошенные попытки, проверка кандидатов, открытие попыток. */
+    /** Тело транзакции такта: брошенные попытки, проверка кандидатов, открытие попыток пачкой. */
     private Tick tick(
             final Ordering ordering, final Map<String, ContractShape> types, final int limit, final int expiredLimit) {
         TaskSql.forceCustomPlan(this.jdbc);
-        final Instant activeFrom = TaskPartitionHorizon.activeFrom(this.jdbc);
-        final List<Row> rows = this.readBranches(activeFrom, ordering, types, limit, expiredLimit);
+        final TaskPartitionHorizon.ActiveRange range = TaskPartitionHorizon.activeRange(this.jdbc);
+        final Instant activeFrom = range.from();
+        final List<Row> rows = this.readBranches(range, ordering, types, limit, expiredLimit);
         final List<Candidate> candidates = rows.stream()
                 .filter(Candidate.class::isInstance)
                 .map(Candidate.class::cast)
@@ -180,48 +133,34 @@ public class TaskClaimer {
                         .toList(),
                 types,
                 stopped);
-        final List<ClaimedAttempt> claimed = candidates.stream()
-                .filter(candidate -> !stopped.contains(candidate.entity()))
-                .sorted(ordering.candidates())
-                .limit(limit)
-                .map(candidate -> this.start(candidate, types.get(candidate.taskType())))
-                .toList();
+        final List<ClaimedAttempt> claimed = this.opener.open(
+                this.jdbc,
+                activeFrom,
+                candidates.stream()
+                        .filter(candidate -> !stopped.contains(candidate.entity()))
+                        .sorted(ordering.candidates())
+                        .limit(limit)
+                        .map(candidate -> TaskAttemptOpener.opening(
+                                candidate.entity(),
+                                candidate.taskType(),
+                                candidate.phase(),
+                                candidate.shape(),
+                                types.get(candidate.taskType()),
+                                candidate.snapshot()))
+                        .toList());
         return new Tick(claimed, afterCommit);
     }
 
     private List<Row> readBranches(
-            final Instant activeFrom,
+            final TaskPartitionHorizon.ActiveRange range,
             final Ordering ordering,
             final Map<String, ContractShape> types,
             final int limit,
             final int expiredLimit) {
-        return this.jdbc
-                .sql(branchesQuery(ordering))
-                .param("activeFrom", TaskSql.parameter(activeFrom))
-                .param("types", types.keySet().toArray(String[]::new))
-                .param("limit", limit)
-                .param("expiredLimit", expiredLimit)
+        final List<String> polled = types.keySet().stream().sorted().toList();
+        return TaskClaimQuery.bind(this.jdbc.sql(this.query.text(ordering, polled)), range, polled, limit, expiredLimit)
                 .query(TaskClaimer::row)
                 .list();
-    }
-
-    /**
-     * Запрос такта целиком — обе ветки. Параметры: {@code activeFrom}, {@code types}, {@code limit},
-     * {@code expiredLimit}. Открыт пакету ради прототипа отсечения партиций, который проверяет
-     * планы и блокировки ровно этого текста.
-     *
-     * @param ordering порядок первой ветки
-     * @return текст запроса
-     */
-    static String branchesQuery(final Ordering ordering) {
-        return "WITH "
-                + String.join(
-                        ",\n",
-                        candidates(TaskLevel.TASK, "e.phase", "e.contract_shape", ordering),
-                        candidates(TaskLevel.BATCH, "e.phase", "NULL::text", ordering),
-                        candidates(TaskLevel.UNIT, "'PROCESS'", "NULL::text", ordering),
-                        EXPIRED)
-                + BRANCHES;
     }
 
     private Ordering ordering(final PollerSettings poller) {
@@ -230,44 +169,6 @@ public class TaskClaimer {
             case PRIORITY -> Ordering.PRIORITY;
             case QUOTA -> this.random.getAsDouble() < poller.fifoShare() ? Ordering.FIFO : Ordering.PRIORITY;
         };
-    }
-
-    private ClaimedAttempt start(final Candidate candidate, final ContractShape shape) {
-        final TaskPhase phase = candidate.phase() == null ? shape.firstPhase() : candidate.phase();
-        final boolean firstClaim = candidate.entity().level() == TaskLevel.TASK && candidate.shape() == null;
-        return this.opener.open(
-                this.jdbc, candidate.entity(), candidate.taskType(), phase, firstClaim, shape, candidate.snapshot());
-    }
-
-    private static String candidates(
-            final TaskLevel level, final String phase, final String contractShape, final Ordering ordering) {
-        return """
-                %6$s AS (SELECT '%1$s' AS level, e.execution_created_at, e.id AS target_id, e.execution_id,
-                        e.task_type, %2$s AS phase, %3$s AS contract_shape, e.priority, e.next_attempt_at,
-                        e.claim_order_at, e.payload::text AS payload, e.created_at, %7$s, %8$s,
-                        NULL::uuid AS attempt_id, NULL::text AS locked_by, NULL::integer AS lease_renewals
-                   FROM %4$s e
-                  WHERE e.status = 'PENDING'
-                    AND e.next_attempt_at <= now()
-                    AND e.execution_created_at >= :activeFrom
-                    AND e.task_type = ANY(CAST(:types AS text[]))
-                    AND NOT EXISTS (SELECT 1 FROM tc_task_attempt a
-                                     WHERE a.execution_created_at >= :activeFrom
-                                       AND a.execution_created_at = e.execution_created_at
-                                       AND a.target_id = e.id
-                                       AND a.finished_at IS NULL)
-                  ORDER BY %5$s
-                  LIMIT :limit
-                    FOR UPDATE OF e SKIP LOCKED)
-                """.formatted(
-                        level.name(),
-                        phase,
-                        contractShape,
-                        level.table(),
-                        ordering.orderBy,
-                        level.table() + "_candidates",
-                        level == TaskLevel.TASK ? TASK_ORIGIN : NO_ORIGIN,
-                        parent(level));
     }
 
     private static Row row(final ResultSet rs, final int rowNum) throws SQLException {
@@ -307,24 +208,22 @@ public class TaskClaimer {
                         rs.getString("payload")));
     }
 
-    private static String parent(final TaskLevel level) {
-        return switch (level) {
-            case TASK -> NO_PARENT;
-            case BATCH -> BATCH_PARENT;
-            case UNIT -> UNIT_PARENT;
-        };
-    }
-
     /** Порядок, в котором выбирается готовая работа в этом такте. */
     enum Ordering {
-        DEADLINE("e.claim_order_at"),
-        PRIORITY("e.priority, e.next_attempt_at"),
-        FIFO("e.next_attempt_at");
+        DEADLINE("%1$s.claim_order_at"),
+        PRIORITY("%1$s.priority, %1$s.next_attempt_at"),
+        FIFO("%1$s.next_attempt_at");
 
-        private final String orderBy;
+        /** Колонки {@code ORDER BY}; на месте {@code %1$s} — псевдоним выборки. */
+        private final String columns;
 
-        Ordering(final String orderBy) {
-            this.orderBy = orderBy;
+        Ordering(final String columns) {
+            this.columns = columns;
+        }
+
+        /** {@code ORDER BY} этой формы по колонкам выборки {@code alias}. */
+        String orderBy(final String alias) {
+            return " ORDER BY " + this.columns.formatted(alias);
         }
 
         /** Порядок кандидатов такта — по их ключам. */

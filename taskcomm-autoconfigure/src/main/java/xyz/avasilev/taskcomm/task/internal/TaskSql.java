@@ -4,6 +4,8 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.List;
+import java.util.function.Function;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
@@ -27,6 +29,22 @@ final class TaskSql {
      */
     static OffsetDateTime parameter(final Instant moment) {
         return Instant.MIN.equals(moment) ? OffsetDateTime.MIN : moment.atOffset(ZoneOffset.UTC);
+    }
+
+    /**
+     * Столбец значений для {@code unnest(CAST(:param AS тип[]))}: строками, а тип задаёт
+     * приведение в запросе. Пустые значения уходят как {@code NULL}.
+     *
+     * @param items строки пачки
+     * @param value значение столбца у строки
+     * @param <T> тип строки пачки
+     * @return столбец
+     */
+    static <T> String[] column(final List<T> items, final Function<T, ?> value) {
+        return items.stream()
+                .map(value)
+                .map(item -> item == null ? null : String.valueOf(item))
+                .toArray(String[]::new);
     }
 
     /**

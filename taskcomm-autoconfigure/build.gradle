@@ -82,6 +82,20 @@ tasks.named('check') {
     dependsOn integrationTest
 }
 
+// Нагрузочные сценарии (*LoadScenario) — вне check, запускаются руками на машине с Docker
+// (docs/adr/0128-claim-load-scenario.md). Ни test, ни integrationTest их не берут по имени класса.
+tasks.register('loadTest', Test) {
+    group = 'verification'
+    description = 'Нагрузочные сценарии (*LoadScenario) на PostgreSQL в Testcontainers. Долго, нужен Docker.'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    include '**/*LoadScenario.class'
+    outputs.upToDateWhen { false }
+    testLogging {
+        showStandardStreams = true
+    }
+}
+
 checkstyle {
     toolVersion = libs.versions.checkstyle.get()
     configFile = rootProject.file('checkstyle.xml')

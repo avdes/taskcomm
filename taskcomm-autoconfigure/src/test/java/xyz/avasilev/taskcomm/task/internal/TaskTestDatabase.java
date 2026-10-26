@@ -1,5 +1,6 @@
 package xyz.avasilev.taskcomm.task.internal;
 
+import com.zaxxer.hikari.HikariDataSource;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
@@ -77,6 +78,24 @@ final class TaskTestDatabase {
      */
     static TaskTestDatabase create() {
         final TaskTestDatabase database = new TaskTestDatabase(TestPostgres.dataSource(TestPostgres.newSchema()));
+        database.maintenance.startup();
+        return database;
+    }
+
+    /**
+     * Новая схема, как у {@link #create()}, но на пуле соединений — как у потребителя: соединения
+     * переживают транзакцию, кеши каталога PostgreSQL прогреты (docs/adr/0132-load-scenario-on-pool.md).
+     * Без пула каждая транзакция открывает новое соединение и платит за холодный каталог.
+     *
+     * @return база для нагрузочного сценария
+     */
+    static TaskTestDatabase createPooled() {
+        final HikariDataSource pool = new HikariDataSource();
+        pool.setJdbcUrl(TestPostgres.jdbcUrl(TestPostgres.newSchema()));
+        pool.setUsername(TestPostgres.username());
+        pool.setPassword(TestPostgres.password());
+        pool.setMaximumPoolSize(4);
+        final TaskTestDatabase database = new TaskTestDatabase(pool);
         database.maintenance.startup();
         return database;
     }

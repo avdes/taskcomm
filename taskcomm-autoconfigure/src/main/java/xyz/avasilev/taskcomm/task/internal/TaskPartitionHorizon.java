@@ -51,6 +51,30 @@ class TaskPartitionHorizon {
     }
 
     /**
+     * Диапазон активных партиций для запроса такта (docs/adr/0131-claim-upper-partition-bound.md):
+     * снизу — граница, сверху — {@code now()} базы с запасом в час. Позже {@code now()} базы
+     * {@code execution_created_at} не бывает (docs/adr/0079-database-clock.md); запас покрывает
+     * транзакции, начавшиеся позже такта. Заведённые наперёд пустые партиции в план не попадают.
+     *
+     * @param jdbc клиент в транзакции такта
+     * @return диапазон
+     */
+    static ActiveRange activeRange(final JdbcClient jdbc) {
+        return jdbc.sql("""
+                        SELECT CASE WHEN isfinite(active_from) THEN active_from END AS active_from,
+                               now() + interval '1 hour' AS active_to
+                          FROM tc_partition_horizon
+                        """)
+                .query((rs, rowNum) -> {
+                    final OffsetDateTime from = rs.getObject("active_from", OffsetDateTime.class);
+                    return new ActiveRange(
+                            from == null ? Instant.MIN : from.toInstant(),
+                            rs.getObject("active_to", OffsetDateTime.class).toInstant());
+                })
+                .single();
+    }
+
+    /**
      * Оживляет партицию: в незавершённое состояние переходит сущность с этим ключом
      * партиционирования. Берёт разделяемую блокировку диапазона и под ней опускает границу,
      * если та выше нижней границы диапазона. Обязан работать в транзакции записи — блокировка
@@ -74,4 +98,12 @@ class TaskPartitionHorizon {
                 .param("lower", lower)
                 .update();
     }
+
+    /**
+     * Диапазон активных партиций запроса такта.
+     *
+     * @param from граница активных партиций; {@link Instant#MIN} — активны все
+     * @param to верхний предел: {@code now()} базы с запасом
+     */
+    record ActiveRange(Instant from, Instant to) {}
 }

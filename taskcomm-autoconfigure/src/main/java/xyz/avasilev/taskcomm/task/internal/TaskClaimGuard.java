@@ -8,7 +8,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.DoubleSupplier;
-import java.util.function.Function;
 import javax.sql.DataSource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -175,10 +174,11 @@ class TaskClaimGuard {
                 .param("activeFrom", TaskSql.parameter(activeFrom))
                 .param(
                         "executionCreatedAt",
-                        column(children, c -> TaskSql.parameter(c.entity().executionCreatedAt())))
-                .param("id", column(children, c -> c.entity().id()))
-                .param("taskId", column(children, c -> c.parent().taskId()))
-                .param("batchId", column(children, c -> c.parent().batchId()))
+                        TaskSql.column(
+                                children, c -> TaskSql.parameter(c.entity().executionCreatedAt())))
+                .param("id", TaskSql.column(children, c -> c.entity().id()))
+                .param("taskId", TaskSql.column(children, c -> c.parent().taskId()))
+                .param("batchId", TaskSql.column(children, c -> c.parent().batchId()))
                 .query((rs, rowNum) -> new Ancestors(
                         rs.getObject("id", UUID.class),
                         rs.getBoolean("task_cancelled"),
@@ -230,14 +230,6 @@ class TaskClaimGuard {
 
     private static String mismatch(final ContractShape stored, final ContractShape current) {
         return "форма контракта " + stored + " не совпадает с текущей " + current;
-    }
-
-    /** Столбец для {@code unnest}; пустые значения уходят как {@code NULL}. */
-    private static String[] column(final List<ClaimCandidate> candidates, final Function<ClaimCandidate, ?> value) {
-        return candidates.stream()
-                .map(value)
-                .map(item -> item == null ? null : String.valueOf(item))
-                .toArray(String[]::new);
     }
 
     /**
