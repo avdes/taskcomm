@@ -4,9 +4,12 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
+import java.util.function.Supplier;
 import javax.sql.DataSource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * Подстраховочный поллер задач (docs/adr/0126-safety-poller.md): доводит шаги каскада, которые
@@ -42,6 +45,8 @@ class TaskSafetyPoller {
               JOIN {parent} p ON p.execution_created_at = a.execution_created_at AND p.id = a.target_id
              WHERE c.status = 'AWAITING_PARENT'
                AND c.execution_created_at >= :activeFrom
+               AND a.execution_created_at >= :activeFrom
+               AND p.execution_created_at >= :activeFrom
                AND a.finished_at < now() - make_interval(secs => :grace)
              LIMIT :limit
             """;
@@ -51,7 +56,8 @@ class TaskSafetyPoller {
             SELECT p.execution_created_at, p.id, p.task_type
               FROM {parent} p
               JOIN LATERAL (SELECT a.id FROM tc_task_attempt a
-                             WHERE a.execution_created_at = p.execution_created_at AND a.level = :level
+                             WHERE a.execution_created_at = p.execution_created_at
+                               AND a.execution_created_at >= :activeFrom AND a.level = :level
                                AND a.target_id = p.id AND a.phase = 'EXPAND' AND a.status = 'SUCCEEDED'
                              ORDER BY a.started_at DESC
                              LIMIT 1) x ON true
@@ -64,7 +70,8 @@ class TaskSafetyPoller {
 
     private static final String NO_UNFINISHED = """
                AND NOT EXISTS (SELECT 1 FROM {child} c
-                                WHERE c.execution_created_at = p.execution_created_at AND c.parent_attempt_id = x.id
+                                WHERE c.execution_created_at = p.execution_created_at
+                                  AND c.execution_created_at >= :activeFrom AND c.parent_attempt_id = x.id
                                   AND c.status IN ('AWAITING_PARENT', 'PENDING', 'RUNNING', 'AWAITING_CHILDREN'))
             """;
 
@@ -79,6 +86,8 @@ class TaskSafetyPoller {
 
     private final JdbcClient jdbc;
 
+    private final TransactionTemplate transactions;
+
     private final TaskChildren children;
 
     private final TaskCancellation cancellation;
@@ -87,10 +96,12 @@ class TaskSafetyPoller {
 
     TaskSafetyPoller(
             final DataSource dataSource,
+            final PlatformTransactionManager transactionManager,
             final TaskChildren children,
             final TaskCancellation cancellation,
             final SafetySettings settings) {
         this.jdbc = JdbcClient.create(dataSource);
+        this.transactions = TaskSql.transactions(transactionManager);
         this.children = children;
         this.cancellation = cancellation;
         this.settings = settings;
@@ -108,9 +119,46 @@ class TaskSafetyPoller {
         }
     }
 
+    /**
+     * Запрос закрытых попыток раскрытия уровня {@code parent}, у которых остались дети уровня
+     * {@code child} в {@code AWAITING_PARENT}.
+     *
+     * @param parent уровень родителя
+     * @param child уровень детей
+     * @return текст запроса
+     */
+    static String closedExpansionsQuery(final TaskLevel parent, final TaskLevel child) {
+        return CLOSED_EXPANSIONS.replace("{child}", child.table()).replace("{parent}", parent.table());
+    }
+
+    /**
+     * Запрос родителей уровня {@code parent}, которым больше нечего ждать.
+     *
+     * @param parent уровень родителя
+     * @return текст запроса
+     */
+    static String stuckParentsQuery(final TaskLevel parent) {
+        final StringBuilder noUnfinished = new StringBuilder();
+        TaskChildren.childLevels(parent)
+                .forEach(level -> noUnfinished.append(NO_UNFINISHED.replace("{child}", level.table())));
+        return STUCK_PARENTS
+                .replace("{parent}", parent.table())
+                .replace("{noUnfinished}", noUnfinished.toString().strip());
+    }
+
+    /**
+     * Запрос отменённых родителей уровня {@code parent} в {@code AWAITING_CHILDREN}.
+     *
+     * @param parent уровень родителя
+     * @return текст запроса
+     */
+    static String cancelledParentsQuery(final TaskLevel parent) {
+        return CANCELLED_PARENTS.replace("{parent}", parent.table());
+    }
+
     private void settleClosedExpansions(final Instant activeFrom, final TaskLevel parent, final TaskLevel child) {
-        final List<ClosedExpansion> found = this.jdbc
-                .sql(CLOSED_EXPANSIONS.replace("{child}", child.table()).replace("{parent}", parent.table()))
+        final List<ClosedExpansion> found = this.search(() -> this.jdbc
+                .sql(closedExpansionsQuery(parent, child))
                 .param("activeFrom", TaskSql.parameter(activeFrom))
                 .param("grace", TaskSql.seconds(this.settings.grace()))
                 .param("limit", LIMIT)
@@ -123,7 +171,7 @@ class TaskSafetyPoller {
                         rs.getObject("id", UUID.class),
                         "SUCCEEDED".equals(rs.getString("status")),
                         rs.getString("task_type")))
-                .list();
+                .list());
         for (final ClosedExpansion expansion : found) {
             log.info(
                     "Подстраховка: дети попытки раскрытия {} ({} {}) переводятся из AWAITING_PARENT",
@@ -146,15 +194,7 @@ class TaskSafetyPoller {
     }
 
     private void finishStuckParents(final Instant activeFrom, final TaskLevel parent) {
-        final StringBuilder noUnfinished = new StringBuilder();
-        TaskChildren.childLevels(parent)
-                .forEach(level -> noUnfinished.append(NO_UNFINISHED.replace("{child}", level.table())));
-        for (final Found stuck : this.find(
-                STUCK_PARENTS
-                        .replace("{parent}", parent.table())
-                        .replace("{noUnfinished}", noUnfinished.toString().strip()),
-                activeFrom,
-                parent)) {
+        for (final Found stuck : this.find(stuckParentsQuery(parent), activeFrom, parent)) {
             if (this.children.finishIfDone(stuck.entity(), stuck.taskType())) {
                 log.info(
                         "Подстраховка: {} {} больше нечего ждать — передан дальше",
@@ -165,14 +205,13 @@ class TaskSafetyPoller {
     }
 
     private void redoCancellations(final Instant activeFrom, final TaskLevel parent) {
-        for (final Found cancelled :
-                this.find(CANCELLED_PARENTS.replace("{parent}", parent.table()), activeFrom, parent)) {
+        for (final Found cancelled : this.find(cancelledParentsQuery(parent), activeFrom, parent)) {
             this.cancellation.descendants(cancelled.entity(), cancelled.taskType());
         }
     }
 
     private List<Found> find(final String sql, final Instant activeFrom, final TaskLevel parent) {
-        return this.jdbc
+        return this.search(() -> this.jdbc
                 .sql(sql)
                 .param("activeFrom", TaskSql.parameter(activeFrom))
                 .param("level", parent.name())
@@ -185,7 +224,19 @@ class TaskSafetyPoller {
                                 rs.getObject("execution_created_at", OffsetDateTime.class)
                                         .toInstant()),
                         rs.getString("task_type")))
-                .list();
+                .list());
+    }
+
+    /**
+     * Поиск в своей короткой транзакции под {@code force_custom_plan}: иначе подготовленный
+     * на сервере запрос получил бы общий план, и партиции ниже границы блокировались бы,
+     * несмотря на условие (docs/adr/0101-active-partition-horizon.md).
+     */
+    private <R> List<R> search(final Supplier<List<R>> query) {
+        return this.transactions.execute(status -> {
+            TaskSql.forceCustomPlan(this.jdbc);
+            return query.get();
+        });
     }
 
     /**

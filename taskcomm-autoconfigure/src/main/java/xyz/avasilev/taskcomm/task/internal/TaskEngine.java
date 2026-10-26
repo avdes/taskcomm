@@ -100,6 +100,7 @@ public class TaskEngine implements SmartLifecycle {
         this.discard = new TaskResultDiscard(dataSource, transactionManager, settings.discard());
         this.safety = new TaskSafetyPoller(
                 dataSource,
+                transactionManager,
                 children,
                 new TaskCancellation(dataSource, transactionManager, children),
                 settings.safety());

@@ -40,6 +40,7 @@ class TaskSafetyIT {
         final TaskChildren children = this.db.children();
         this.safety = new TaskSafetyPoller(
                 this.db.dataSource,
+                this.db.transactionManager,
                 children,
                 new TaskCancellation(this.db.dataSource, this.db.transactionManager, children),
                 new SafetySettings(Duration.ofMinutes(1), Duration.ofMillis(1)));
